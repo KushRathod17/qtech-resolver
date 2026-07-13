@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 const NAV = [
   { to: "/backlog", label: "Backlog", icon: "☰" },
   { to: "/board", label: "Board", icon: "▦" },
+  { to: "/workflow", label: "Workflow", icon: "⇄" },
   { to: "/reports", label: "Reports", icon: "◔" },
   { to: "/sprints", label: "Sprints", icon: "⚑" },
   { to: "/components", label: "Components", icon: "◇" },

@@ -2486,3 +2486,223 @@ body { background: var(--color-bg); color: var(--color-text); }
 
 .composer .field-hint { margin-top: 6px; }
 
+
+/* ==========================================================================
+   Cross-team workflow
+   ========================================================================== */
+.workflow-page {
+  padding: 24px 28px 40px;
+}
+
+/* --- The "who has it / what can I do" strip on the ticket panel --- */
+.workflow-strip {
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-alt);
+  border: 1px solid var(--color-border);
+}
+
+.workflow-label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--color-text-faint);
+  margin-bottom: 8px;
+}
+
+.workflow-holder {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.workflow-holder .workflow-label { margin-bottom: 0; }
+
+.workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.workflow-btn {
+  font-size: 12.5px;
+  padding: 8px 12px;
+}
+/* A "send it back" action shouldn't look like the happy path. */
+.workflow-btn.tone-returned_not_reproducible,
+.workflow-btn.tone-returned_still_broken {
+  background: transparent;
+  border-color: var(--priority-high);
+  color: var(--priority-high);
+}
+.workflow-btn.tone-returned_not_reproducible:hover,
+.workflow-btn.tone-returned_still_broken:hover {
+  background: rgba(245, 166, 35, 0.1);
+}
+.workflow-btn.tone-resolved,
+.workflow-btn.tone-verified_returned_to_reporter {
+  background: var(--priority-low);
+}
+.workflow-btn.tone-resolved:hover,
+.workflow-btn.tone-verified_returned_to_reporter:hover {
+  filter: brightness(1.1);
+}
+
+.workflow-waiting {
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 12.5px;
+  color: var(--color-text-faint);
+}
+
+.route-strip .field-row { margin-bottom: 0; }
+.route-strip .field:last-child { margin-bottom: 0; }
+
+/* --- Handoff modal --- */
+.handoff-card {
+  width: 520px;
+}
+.handoff-body {
+  padding: 18px 22px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.handoff-context {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.handoff-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--color-text);
+}
+.handoff-note-hint {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--color-text-dim);
+}
+
+/* --- Chain-of-custody timeline --- */
+.timeline-scroll {
+  overflow-x: auto;
+}
+
+.timeline-table {
+  min-width: 720px;
+}
+.timeline-table td { vertical-align: top; }
+
+.timeline-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+.timeline-note {
+  color: var(--color-text-dim);
+  max-width: 260px;
+  white-space: normal;
+}
+
+.current-holder td {
+  background: rgba(62, 123, 250, 0.06);
+}
+.held-open {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.timeline-raise-note {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-alt);
+  border: 1px solid var(--color-border);
+  font-size: 12.5px;
+  color: var(--color-text-dim);
+}
+
+.action-pill {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 20px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+.action-pill.tone-forward {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: rgba(62, 123, 250, 0.1);
+}
+.action-pill.tone-back {
+  border-color: var(--priority-high);
+  color: var(--priority-high);
+  background: rgba(245, 166, 35, 0.1);
+}
+.action-pill.tone-good {
+  border-color: var(--priority-low);
+  color: var(--priority-low);
+  background: rgba(95, 184, 138, 0.1);
+}
+.action-pill.tone-current {
+  border-style: dashed;
+  color: var(--color-text-faint);
+}
+
+/* --- Workflow report --- */
+.workflow-row {
+  cursor: pointer;
+}
+.workflow-row:hover td {
+  background: var(--color-panel-alt);
+}
+
+.drill-card {
+  width: 900px;
+  max-width: calc(100vw - 40px);
+}
+.drill-body {
+  padding: 18px 22px 22px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* --- Team kinds in Settings --- */
+.state-pill.kind-support {
+  border-color: var(--priority-low);
+  color: var(--priority-low);
+  background: rgba(95, 184, 138, 0.1);
+}
+.state-pill.kind-testing {
+  border-color: var(--priority-high);
+  color: var(--priority-high);
+  background: rgba(245, 166, 35, 0.1);
+}
+.state-pill.kind-development {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: rgba(62, 123, 250, 0.1);
+}
+
+/* Somebody with no team can't act on the workflow â€” say so, don't hide it. */
+.filter-select.needs-team {
+  border-color: var(--priority-high);
+  color: var(--priority-high);
+}
+

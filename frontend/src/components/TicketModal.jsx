@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 
-import { ticketsApi, commentsApi, errorMessage } from "../api/resources";
+import { ticketsApi, commentsApi, workflowApi, teamsApi, errorMessage } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
 import LabelPicker from "./LabelPicker";
 import SlaBadge from "./SlaBadge";
 import SubtaskList from "./SubtaskList";
 import AttachmentList from "./AttachmentList";
 import CommentComposer, { CommentBody } from "./CommentComposer";
+import HandoffModal from "./HandoffModal";
+import HandoffTimeline from "./HandoffTimeline";
 import {
   COLUMNS,
   PRIORITIES,
@@ -57,6 +59,7 @@ export default function TicketModal({
   labels,
   components = [],
   clients = [],
+  teams = [],
   onClose,
   onSaved,
   onDeleted,
@@ -72,6 +75,29 @@ export default function TicketModal({
 
   const [comments, setComments] = useState([]);
   const [activity, setActivity] = useState([]);
+  const [handoffs, setHandoffs] = useState([]);
+  const [pendingAction, setPendingAction] = useState(null); // which handoff modal is open
+
+  // --- Routing a NEW ticket into the workflow ---
+  // Defaults to the first Testing team, which is the normal path for a customer
+  // bug report. Left blank, the ticket is created outside the workflow.
+  const defaultTeam = teams.find((t) => t.kind === "testing") || null;
+  const [routeTeamId, setRouteTeamId] = useState(defaultTeam?.id || "");
+  const [routeUserId, setRouteUserId] = useState("");
+  const [routeNote, setRouteNote] = useState("");
+  const [routeMembers, setRouteMembers] = useState([]);
+
+  useEffect(() => {
+    if (!isNew || !routeTeamId) {
+      setRouteMembers([]);
+      return;
+    }
+    teamsApi
+      .members(routeTeamId)
+      .then(setRouteMembers)
+      .catch(() => setRouteMembers([]));
+    setRouteUserId("");
+  }, [isNew, routeTeamId]);
   const [threadLoading, setThreadLoading] = useState(!isNew);
   const [posting, setPosting] = useState(false);
 
@@ -81,14 +107,16 @@ export default function TicketModal({
     if (isNew) return;
     setThreadLoading(true);
     try {
-      const [c, a] = await Promise.all([
+      const [c, a, h] = await Promise.all([
         commentsApi.list(ticket.id),
         ticketsApi.activity(ticket.id),
+        workflowApi.handoffs(ticket.id),
       ]);
       setComments(c);
       setActivity(a);
+      setHandoffs(h);
     } catch (err) {
-      setError(errorMessage(err, "Couldn't load comments."));
+      setError(errorMessage(err, "Couldn't load this ticket's history."));
     } finally {
       setThreadLoading(false);
     }
@@ -118,6 +146,10 @@ export default function TicketModal({
       client_name: form.client_name.trim() || null,
       due_date: form.due_date ? new Date(form.due_date).toISOString() : null,
       label_ids: form.label_ids,
+      // Only meaningful on create — this is what raises it into the workflow.
+      ...(isNew && routeUserId
+        ? { route_to_user_id: routeUserId, route_note: routeNote.trim() || null }
+        : {}),
     };
   }
 
@@ -251,6 +283,51 @@ export default function TicketModal({
         </header>
 
         <div className="panel-body">
+          {/* --- Cross-team workflow: who has it, and what may I do --- */}
+          {!isNew && ticket.current_team && (
+            <div className="workflow-strip">
+              <div className="workflow-holder">
+                <span className="workflow-label">Currently with</span>
+                <span
+                  className="component-chip"
+                  style={{ borderColor: ticket.current_team.color, color: ticket.current_team.color }}
+                >
+                  {ticket.current_team.name}
+                </span>
+                {ticket.assignee && (
+                  <span className="timeline-person">
+                    <Avatar user={ticket.assignee} size={22} />
+                    {ticket.assignee.full_name}
+                  </span>
+                )}
+              </div>
+
+              {ticket.available_actions.length > 0 ? (
+                <div className="workflow-actions">
+                  {/* Rendered FROM the server's list — the UI can't offer an
+                      action the server would reject. */}
+                  {ticket.available_actions.map((a) => (
+                    <button
+                      key={a.action}
+                      type="button"
+                      className={`btn-primary workflow-btn tone-${a.action}`}
+                      onClick={() => setPendingAction(a)}
+                      disabled={saving}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="workflow-waiting">
+                  {ticket.status === "done"
+                    ? "Resolved — the chain is closed."
+                    : "Waiting on them. You have no actions on this ticket."}
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="field">
             <label htmlFor="t-title">Title</label>
             <input
@@ -369,6 +446,64 @@ export default function TicketModal({
             </div>
           )}
 
+          {isNew && teams.length > 0 && (
+            <div className="workflow-strip route-strip">
+              <span className="workflow-label">Send this to</span>
+
+              <div className="field-row">
+                <div className="field">
+                  <label htmlFor="r-team">Team</label>
+                  <select
+                    id="r-team"
+                    value={routeTeamId}
+                    onChange={(e) => setRouteTeamId(e.target.value)}
+                  >
+                    <option value="">Don't route (board only)</option>
+                    {teams.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label htmlFor="r-user">Person</label>
+                  <select
+                    id="r-user"
+                    value={routeUserId}
+                    onChange={(e) => setRouteUserId(e.target.value)}
+                    disabled={!routeTeamId}
+                  >
+                    <option value="">
+                      {routeTeamId ? "Pick a person…" : "Pick a team first"}
+                    </option>
+                    {routeMembers.map((m) => (
+                      <option key={m.id} value={m.id}>{m.full_name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {routeTeamId && routeMembers.length === 0 && (
+                <p className="error-text">
+                  Nobody is on that team yet — assign someone in Settings first.
+                </p>
+              )}
+
+              {routeUserId && (
+                <div className="field">
+                  <label htmlFor="r-note">Note for them</label>
+                  <input
+                    id="r-note"
+                    value={routeNote}
+                    onChange={(e) => setRouteNote(e.target.value)}
+                    placeholder="What did the customer report?"
+                    maxLength={2000}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="field">
             <label>Labels</label>
             <LabelPicker
@@ -412,6 +547,16 @@ export default function TicketModal({
               {/* Epics group tickets; only non-epics own sub-tasks. */}
               {ticket.ticket_type !== "epic" && !ticket.parent_id && (
                 <SubtaskList ticket={ticket} users={users} onChanged={loadThread} />
+              )}
+
+              {handoffs.length > 0 && (
+                <section className="modal-section">
+                  <h4>
+                    Chain of custody{" "}
+                    <span className="subtask-tally">{handoffs.length} handoff{handoffs.length === 1 ? "" : "s"}</span>
+                  </h4>
+                  <HandoffTimeline handoffs={handoffs} />
+                </section>
               )}
 
               <AttachmentList ticket={ticket} onChanged={loadThread} />
@@ -489,6 +634,19 @@ export default function TicketModal({
             {saving ? "Saving…" : isNew ? "Create ticket" : "Save changes"}
           </button>
         </footer>
+
+        {pendingAction && (
+          <HandoffModal
+            ticket={ticket}
+            action={pendingAction}
+            onClose={() => setPendingAction(null)}
+            onDone={(updated) => {
+              setPendingAction(null);
+              onSaved(updated);   // board picks up the new team/assignee/status
+              loadThread();       // and the timeline gains a row
+            }}
+          />
+        )}
       </aside>
     </div>
   );

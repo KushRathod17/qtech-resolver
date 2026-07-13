@@ -54,6 +54,24 @@ export const commentsApi = {
       .then((r) => r.data),
 };
 
+export const teamsApi = {
+  list: () => apiClient.get("/teams/").then((r) => r.data),
+  members: (id) => apiClient.get(`/teams/${id}/members`).then((r) => r.data),
+  create: (payload) => apiClient.post("/teams/", payload).then((r) => r.data),
+  update: (id, payload) => apiClient.patch(`/teams/${id}`, payload).then((r) => r.data),
+  remove: (id) => apiClient.delete(`/teams/${id}`),
+};
+
+export const workflowApi = {
+  // The chain of custody for one ticket.
+  handoffs: (ticketId) => apiClient.get(`/tickets/${ticketId}/handoffs`).then((r) => r.data),
+  handoff: (ticketId, payload) =>
+    apiClient.post(`/tickets/${ticketId}/handoff`, payload).then((r) => r.data),
+
+  report: () => apiClient.get("/reports/workflow").then((r) => r.data),
+  holdingTimes: () => apiClient.get("/reports/team-holding-times").then((r) => r.data),
+};
+
 export const componentsApi = {
   list: () => apiClient.get("/components/").then((r) => r.data),
   stats: () => apiClient.get("/components/stats").then((r) => r.data),
@@ -90,6 +108,8 @@ export const sprintsApi = {
 export const usersApi = {
   list: () => apiClient.get("/users/").then((r) => r.data),
   setRole: (id, role) => apiClient.patch(`/users/${id}/role`, { role }).then((r) => r.data),
+  setTeam: (id, teamId) =>
+    apiClient.patch(`/users/${id}/team`, { team_id: teamId || null }).then((r) => r.data),
 
   me: () => apiClient.get("/users/me").then((r) => r.data),
   profile: (id) => apiClient.get(`/users/${id}`).then((r) => r.data),

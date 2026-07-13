@@ -6,6 +6,7 @@ export default function BoardToolbar({
   users,
   labels,
   components = [],
+  teams = [],
   savedFilters = [],
   onSaveFilter,
   onDeleteFilter,
@@ -23,6 +24,7 @@ export default function BoardToolbar({
     filters.priority ||
     filters.ticket_type ||
     filters.component_id ||
+    filters.current_team_id ||
     filters.breached ||
     filters.watching;
 
@@ -96,6 +98,22 @@ export default function BoardToolbar({
             );
           })}
         </div>
+
+        {/* "What's sitting in my team right now" — the whole point of the
+            cross-team workflow. */}
+        {teams.length > 0 && (
+          <select
+            className="filter-select"
+            value={filters.current_team_id}
+            onChange={set("current_team_id")}
+            aria-label="Filter by the team holding the ticket"
+          >
+            <option value="">Any team holding</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>With {t.name}</option>
+            ))}
+          </select>
+        )}
 
         {/* Component first — on a queue spanning several products, "which
             product?" is the question people filter by most. */}
@@ -174,6 +192,7 @@ export default function BoardToolbar({
                 priority: "",
                 ticket_type: "",
                 component_id: "",
+                current_team_id: "",
                 breached: "",
                 watching: "",
               })

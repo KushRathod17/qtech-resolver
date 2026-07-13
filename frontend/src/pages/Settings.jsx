@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 
-import { labelsApi, usersApi, slaApi, errorMessage } from "../api/resources";
+import { labelsApi, usersApi, slaApi, teamsApi, errorMessage } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
 import { Avatar, PRIORITY_LABELS, PriorityIcon } from "../board/constants";
 
@@ -177,7 +177,109 @@ function LabelsPanel({ canManage }) {
   );
 }
 
-function PeoplePanel({ isAdmin, currentUser }) {
+const TEAM_KINDS = ["support", "testing", "development", "other"];
+const KIND_HINTS = {
+  support: "Raises tickets and closes them.",
+  testing: "Reproduces bugs and verifies fixes.",
+  development: "Fixes confirmed bugs.",
+  other: "Outside the bug workflow.",
+};
+
+function TeamsPanel({ canManage, teams, setTeams }) {
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState("other");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function create(e) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      const created = await teamsApi.create({ name: name.trim(), kind });
+      setTeams((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setName("");
+      setKind("other");
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't create that team."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(team) {
+    if (!window.confirm(`Delete "${team.name}"? Its members lose their team.`)) return;
+    try {
+      await teamsApi.remove(team.id);
+      setTeams((prev) => prev.filter((t) => t.id !== team.id));
+    } catch (err) {
+      // The server refuses if the team is mid-flight on a ticket — show why.
+      setError(errorMessage(err, "Couldn't delete that team."));
+    }
+  }
+
+  return (
+    <section className="settings-panel">
+      <div className="settings-panel-head">
+        <h3>Teams</h3>
+        <p className="chart-sub">
+          The workflow routes by a team's <strong>kind</strong>, not its name — so you can rename
+          these, or add more, without breaking the handoff rules.
+        </p>
+      </div>
+
+      {error && <div className="banner-error" role="alert">{error}</div>}
+
+      {canManage && (
+        <form className="label-create" onSubmit={create}>
+          <input
+            className="search-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="New team name"
+            maxLength={60}
+            aria-label="New team name"
+          />
+          <select
+            className="filter-select"
+            value={kind}
+            onChange={(e) => setKind(e.target.value)}
+            aria-label="Team kind"
+          >
+            {TEAM_KINDS.map((k) => (
+              <option key={k} value={k}>{k}</option>
+            ))}
+          </select>
+          <button type="submit" className="btn-primary" disabled={busy || !name.trim()}>
+            Add
+          </button>
+        </form>
+      )}
+
+      <ul className="settings-list">
+        {teams.map((t) => (
+          <li key={t.id} className="settings-row">
+            <span className="color-swatch-static" style={{ background: t.color }} />
+            <div className="settings-row-name">
+              <strong>{t.name}</strong>
+              <span className="settings-row-sub">{KIND_HINTS[t.kind] || t.kind}</span>
+            </div>
+            <span className={`state-pill kind-${t.kind}`}>{t.kind}</span>
+            {canManage && (
+              <button type="button" className="btn-danger" onClick={() => remove(t)}>
+                Delete
+              </button>
+            )}
+          </li>
+        ))}
+        {teams.length === 0 && <p className="empty-state">No teams yet.</p>}
+      </ul>
+    </section>
+  );
+}
+
+function PeoplePanel({ isAdmin, canManage, currentUser, teams }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -190,6 +292,19 @@ function PeoplePanel({ isAdmin, currentUser }) {
       .catch((err) => setError(errorMessage(err, "Couldn't load people.")))
       .finally(() => setLoading(false));
   }, []);
+
+  async function changeTeam(user, teamId) {
+    setBusyId(user.id);
+    setError("");
+    try {
+      const saved = await usersApi.setTeam(user.id, teamId);
+      setUsers((prev) => prev.map((u) => (u.id === saved.id ? saved : u)));
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't change that team."));
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function changeRole(user, role) {
     setBusyId(user.id);
@@ -229,6 +344,27 @@ function PeoplePanel({ isAdmin, currentUser }) {
                 <strong>{u.full_name}</strong>
                 <span className="settings-row-sub">{u.email}</span>
               </div>
+
+              {/* Team is separate from role: a person with role=developer can
+                  sit on Testing, and an admin can sit on Contact/Support. */}
+              {canManage ? (
+                <select
+                  className={`filter-select ${!u.team_id ? "needs-team" : ""}`}
+                  value={u.team_id || ""}
+                  disabled={busyId === u.id}
+                  onChange={(e) => changeTeam(u, e.target.value)}
+                  aria-label={`Team for ${u.full_name}`}
+                >
+                  <option value="">No team</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="state-pill">
+                  {teams.find((t) => t.id === u.team_id)?.name || "No team"}
+                </span>
+              )}
 
               {isAdmin ? (
                 <select
@@ -354,15 +490,28 @@ export default function Settings() {
   const isAdmin = user?.role === "admin";
   const canManage = isAdmin || user?.role === "manager";
 
+  const [teams, setTeams] = useState([]);
+  const [teamsError, setTeamsError] = useState("");
+
+  useEffect(() => {
+    teamsApi
+      .list()
+      .then(setTeams)
+      .catch((err) => setTeamsError(errorMessage(err, "Couldn't load teams.")));
+  }, []);
+
   return (
     <div className="settings-page">
       <div className="page-head">
         <h2>Settings</h2>
       </div>
 
+      {teamsError && <div className="banner-error" role="alert">{teamsError}</div>}
+
       <div className="settings-grid">
+        <TeamsPanel canManage={canManage} teams={teams} setTeams={setTeams} />
+        <PeoplePanel isAdmin={isAdmin} canManage={canManage} currentUser={user} teams={teams} />
         <LabelsPanel canManage={canManage} />
-        <PeoplePanel isAdmin={isAdmin} currentUser={user} />
         <SlaPanel canManage={canManage} />
       </div>
     </div>

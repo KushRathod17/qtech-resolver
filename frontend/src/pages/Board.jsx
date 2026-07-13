@@ -18,6 +18,7 @@ import {
   sprintsApi,
   componentsApi,
   filtersApi,
+  teamsApi,
   errorMessage,
 } from "../api/resources";
 import { COLUMNS } from "../board/constants";
@@ -34,6 +35,7 @@ const EMPTY_FILTERS = {
   priority: "",
   ticket_type: "",
   component_id: "",
+  current_team_id: "", // what's sitting in this team right now
   breached: "", // "" = any, "true" = only tickets past their SLA
   watching: "", // "" = any, "true" = only tickets I watch
 };
@@ -45,6 +47,7 @@ export default function Board() {
   const [sprints, setSprints] = useState([]);
   const [components, setComponents] = useState([]);
   const [clients, setClients] = useState([]);
+  const [teams, setTeams] = useState([]);
   const [savedFilters, setSavedFilters] = useState([]);
 
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -98,14 +101,16 @@ export default function Board() {
       componentsApi.list(),
       ticketsApi.clients(),
       filtersApi.list(),
+      teamsApi.list(),
     ])
-      .then(([u, l, s, c, cl, sf]) => {
+      .then(([u, l, s, c, cl, sf, tm]) => {
         setUsers(u);
         setLabels(l);
         setSprints(s);
         setComponents(c);
         setClients(cl);
         setSavedFilters(sf);
+        setTeams(tm);
       })
       .catch((err) => setError(errorMessage(err, "Couldn't load board reference data.")));
   }, []);
@@ -340,6 +345,7 @@ export default function Board() {
         users={users}
         labels={labels}
         components={components}
+        teams={teams}
         savedFilters={savedFilters}
         onSaveFilter={handleSaveFilter}
         onDeleteFilter={handleDeleteFilter}
@@ -417,6 +423,7 @@ export default function Board() {
           labels={labels}
           components={components}
           clients={clients}
+          teams={teams}
           onClose={() => {
             setOpenTicket(null);
             setCreating(false);
