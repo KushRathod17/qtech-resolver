@@ -23,12 +23,17 @@ def list_labels(
 def create_label(
     payload: LabelCreate,
     db: Session = Depends(get_db),
-    # Labels are project configuration, not per-ticket data — gated the same way
-    # as deleting one. Developers apply existing labels; they don't mint new ones.
-    current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
+    # Any user can mint a label — a support engineer triaging a live escalation
+    # shouldn't have to file a request to get "OTRAMS-Booking" added. Renaming
+    # and deleting stay privileged, because those rewrite every ticket already
+    # carrying the label.
+    current_user: User = Depends(get_current_user),
 ):
-    if crud.get_label_by_name(db, payload.name):
-        raise HTTPException(status_code=400, detail="A label with that name already exists")
+    existing = crud.get_label_by_name(db, payload.name)
+    if existing:
+        # Two people triaging the same incident will both try to create the same
+        # label. Hand back the one that exists rather than making them care.
+        return existing
     return crud.create_label(db, payload)
 
 

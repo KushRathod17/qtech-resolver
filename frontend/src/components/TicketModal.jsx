@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 
 import { ticketsApi, commentsApi, errorMessage } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
+import LabelPicker from "./LabelPicker";
 import {
   COLUMNS,
   PRIORITIES,
@@ -42,7 +43,15 @@ function ticketToForm(t) {
   };
 }
 
-export default function TicketModal({ ticket, users, labels, onClose, onSaved, onDeleted }) {
+export default function TicketModal({
+  ticket,
+  users,
+  labels,
+  onClose,
+  onSaved,
+  onDeleted,
+  onLabelCreated,
+}) {
   const isNew = !ticket;
   const { user } = useAuth();
   const canDelete = user?.role === "admin" || user?.role === "manager";
@@ -148,15 +157,6 @@ export default function TicketModal({ ticket, users, labels, onClose, onSaved, o
     }
   }
 
-  function toggleLabel(id) {
-    setForm((f) => ({
-      ...f,
-      label_ids: f.label_ids.includes(id)
-        ? f.label_ids.filter((x) => x !== id)
-        : [...f.label_ids, id],
-    }));
-  }
-
   return (
     <div className="modal-overlay" onClick={onClose}>
       <aside className="side-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
@@ -253,23 +253,12 @@ export default function TicketModal({ ticket, users, labels, onClose, onSaved, o
 
           <div className="field">
             <label>Labels</label>
-            <div className="label-picker">
-              {labels.map((l) => {
-                const on = form.label_ids.includes(l.id);
-                return (
-                  <button
-                    key={l.id}
-                    type="button"
-                    className={`label-toggle ${on ? "on" : ""}`}
-                    onClick={() => toggleLabel(l.id)}
-                    style={on ? { background: l.color, borderColor: l.color } : { borderColor: l.color }}
-                  >
-                    {l.name}
-                  </button>
-                );
-              })}
-              {labels.length === 0 && <p className="empty-state">No labels yet.</p>}
-            </div>
+            <LabelPicker
+              labels={labels}
+              selectedIds={form.label_ids}
+              onChange={(ids) => setForm((f) => ({ ...f, label_ids: ids }))}
+              onLabelCreated={onLabelCreated}
+            />
           </div>
 
           {!isNew && (

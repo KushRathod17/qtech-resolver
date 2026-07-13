@@ -351,6 +351,13 @@ export default function Board() {
           }}
           onSaved={(saved) => upsert(saved)}
           onDeleted={(id) => setTickets((prev) => prev.filter((t) => t.id !== id))}
+          onLabelCreated={(label) =>
+            setLabels((prev) =>
+              prev.some((l) => l.id === label.id)
+                ? prev
+                : [...prev, label].sort((a, b) => a.name.localeCompare(b.name))
+            )
+          }
         />
       )}
     </div>

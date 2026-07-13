@@ -2,11 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .database import Base, engine
 from .routers import auth, tickets, comments, users, labels, sprints
 
-Base.metadata.create_all(bind=engine)
-
+# Schema is owned by Alembic now, not create_all(). create_all only ever ADDS
+# missing tables — it silently ignores changes to existing ones, which is how a
+# model edit ends up not being in the database. Apply changes with:
+#   alembic upgrade head
 app = FastAPI(title="QTech Resolver API", version="1.0.0")
 
 app.add_middleware(
