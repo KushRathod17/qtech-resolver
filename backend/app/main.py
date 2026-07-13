@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import Base, engine
-from .routers import auth, tickets, comments, users
+from .routers import auth, tickets, comments, users, labels, sprints
 
 Base.metadata.create_all(bind=engine)
 
@@ -21,6 +21,8 @@ app.include_router(auth.router)
 app.include_router(tickets.router)
 app.include_router(comments.router)
 app.include_router(users.router)
+app.include_router(labels.router)
+app.include_router(sprints.router)
 
 
 @app.get("/health")
