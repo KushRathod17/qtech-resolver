@@ -1,6 +1,16 @@
-# Secrets — never commit real credentials
+# Secrets — never commit real credentials.
+# A bare pattern matches at any depth, so this also covers frontend/.env.
 .env
+.env.*
+!.env.example
 backend/.env
+
+# The Postgres cluster lives outside the repo (C:\Users\Kanishk\pgdata-qtech).
+# Defensive: if anyone ever relocates it inside the project, don't commit the
+# database files or the server log.
+pgdata-qtech/
+**/pgdata-qtech/
+*.log
 
 # Python
 backend/venv/

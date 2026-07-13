@@ -1,0 +1,8 @@
+# Test-only dependencies. Kept out of requirements.txt so a production install
+# doesn't pull in the test stack.
+#
+#   pip install -r requirements.txt -r requirements-dev.txt
+-r requirements.txt
+
+pytest==8.3.3
+httpx==0.27.2
