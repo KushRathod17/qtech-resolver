@@ -8,7 +8,7 @@ from ..dependencies import get_db, get_current_user, require_role
 from ..models import User, UserRole, TicketStatus, TicketPriority, TicketType
 from ..schemas import (
     TicketCreate, TicketUpdate, TicketMove, TicketOut, ActivityLogOut,
-    TicketBulkUpdate, TicketBulkDelete,
+    TicketBulkUpdate, TicketBulkDelete, SubtaskCreate,
 )
 from .. import crud
 
@@ -51,6 +51,7 @@ def list_tickets(
     component_id: Optional[uuid.UUID] = Query(default=None),
     client_name: Optional[str] = Query(default=None),
     breached: Optional[bool] = Query(default=None, description="Only tickets past their SLA"),
+    include_subtasks: bool = Query(default=False, description="Sub-tasks are hidden by default"),
     search: Optional[str] = Query(default=None, description="Matches title, description, client, or ticket number"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -67,8 +68,19 @@ def list_tickets(
         component_id=component_id,
         client_name=client_name,
         breached=breached,
+        include_subtasks=include_subtasks,
         search=search,
     )
+
+
+@router.get("/epics", response_model=list[TicketOut])
+def list_epics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Every epic, each carrying its computed progress. Declared before
+    /{ticket_id} so "epics" isn't parsed as a UUID."""
+    return crud.get_tickets(db, ticket_type=TicketType.EPIC)
 
 
 @router.get("/clients", response_model=list[str])
@@ -138,6 +150,58 @@ def delete_ticket(
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     crud.delete_ticket(db, ticket)
+
+
+@router.post("/{ticket_id}/subtasks", response_model=TicketOut, status_code=status.HTTP_201_CREATED)
+def add_subtask(
+    ticket_id: uuid.UUID,
+    payload: SubtaskCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    parent = crud.get_ticket(db, ticket_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    if parent.parent_id:
+        raise HTTPException(status_code=400, detail="A sub-task can't have sub-tasks of its own")
+    if parent.ticket_type == TicketType.EPIC:
+        raise HTTPException(
+            status_code=400,
+            detail="Epics group tickets, not sub-tasks. Set this ticket's epic instead.",
+        )
+    return crud.create_subtask(db, parent, payload, created_by_id=current_user.id)
+
+
+@router.post("/{ticket_id}/duplicate", response_model=TicketOut, status_code=status.HTTP_201_CREATED)
+def duplicate_ticket(
+    ticket_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Copy everything except the history. The same OTRAMS booking bug gets
+    reported by five agencies in a week; retyping it five times is the tax."""
+    ticket = crud.get_ticket(db, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return crud.duplicate_ticket(db, ticket, created_by_id=current_user.id)
+
+
+@router.post("/{ticket_id}/convert-to-epic", response_model=TicketOut)
+def convert_to_epic(
+    ticket_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """A ticket that grew. Its sub-tasks become epic children, since an epic
+    can't own sub-tasks."""
+    ticket = crud.get_ticket(db, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    if ticket.ticket_type == TicketType.EPIC:
+        raise HTTPException(status_code=400, detail="That's already an epic")
+    if ticket.parent_id:
+        raise HTTPException(status_code=400, detail="Detach this sub-task from its parent first")
+    return crud.convert_to_epic(db, ticket, actor_id=current_user.id)
 
 
 @router.get("/{ticket_id}/activity", response_model=list[ActivityLogOut])

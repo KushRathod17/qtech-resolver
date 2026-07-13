@@ -397,12 +397,48 @@ def _sla_for(ticket: models.Ticket, policies: dict) -> dict | None:
     }
 
 
-def attach_sla(db: Session, tickets: list[models.Ticket]) -> list[models.Ticket]:
-    """Hang the computed clock off each ticket so TicketOut can serialise it."""
+def _epic_progress(db: Session, epic: models.Ticket) -> dict:
+    """'6/10 done' for an epic, derived from its children on every read."""
+    children = db.query(models.Ticket).filter(models.Ticket.epic_id == epic.id).all()
+    done = [c for c in children if c.status == models.TicketStatus.DONE]
+
+    points_total = sum(c.story_points or 0 for c in children)
+    points_done = sum(c.story_points or 0 for c in done)
+
+    # Prefer points when the epic is estimated — a 13-point story finishing is
+    # more progress than a 1-point one, and a ticket count hides that.
+    if points_total:
+        percent = round(points_done / points_total * 100)
+    elif children:
+        percent = round(len(done) / len(children) * 100)
+    else:
+        percent = 0
+
+    return {
+        "done": len(done),
+        "total": len(children),
+        "points_done": points_done,
+        "points_total": points_total,
+        "percent": percent,
+    }
+
+
+def attach_derived(db: Session, tickets: list[models.Ticket]) -> list[models.Ticket]:
+    """Hang the computed SLA clock and epic progress off each ticket so
+    TicketOut can serialise them. Neither is ever stored."""
     policies = get_sla_policies(db)
     for ticket in tickets:
         ticket.sla = _sla_for(ticket, policies)
+        ticket.progress = (
+            _epic_progress(db, ticket)
+            if ticket.ticket_type == models.TicketType.EPIC
+            else None
+        )
     return tickets
+
+
+# Kept as an alias: several call sites predate epic progress.
+attach_sla = attach_derived
 
 
 def _sync_resolved_at(ticket: models.Ticket, new_status: models.TicketStatus) -> None:
@@ -434,9 +470,15 @@ def get_tickets(
     component_id: Optional[uuid.UUID] = None,
     client_name: Optional[str] = None,
     breached: Optional[bool] = None,
+    include_subtasks: bool = False,
     search: Optional[str] = None,
 ) -> list[models.Ticket]:
     query = _ticket_query(db)
+
+    # Sub-tasks live inside their parent, not as loose cards on the board.
+    # Showing them at top level would double-count the work.
+    if not include_subtasks:
+        query = query.filter(models.Ticket.parent_id.is_(None))
 
     if status is not None:
         query = query.filter(models.Ticket.status == status)
@@ -470,7 +512,7 @@ def get_tickets(
         query = query.filter(or_(*conditions))
 
     rows = query.order_by(models.Ticket.rank, models.Ticket.created_at.desc()).all()
-    attach_sla(db, rows)
+    attach_derived(db, rows)
 
     # Breach is computed, not a column, so this filter has to happen in Python.
     if breached is not None:
@@ -542,6 +584,7 @@ TRACKED_FIELDS = {
     "assignee_id": "assignee",
     "sprint_id": "sprint",
     "epic_id": "epic",
+    "parent_id": "parent",
     "component_id": "component",
     "client_name": "client",
     "due_date": "due date",
@@ -561,9 +604,9 @@ def _display(db: Session, field: str, value) -> str:
     if field == "sprint_id":
         sprint = get_sprint(db, value)
         return sprint.name if sprint else "unknown"
-    if field == "epic_id":
-        epic = db.query(models.Ticket).filter(models.Ticket.id == value).first()
-        return epic.key if epic else "unknown"
+    if field in ("epic_id", "parent_id"):
+        other = db.query(models.Ticket).filter(models.Ticket.id == value).first()
+        return other.key if other else "unknown"
     if hasattr(value, "value"):  # an enum
         return value.value
     if field == "description":
@@ -607,6 +650,81 @@ def update_ticket(
     db.commit()
     db.refresh(ticket)
     attach_sla(db, [ticket])
+    return ticket
+
+
+def create_subtask(
+    db: Session, parent: models.Ticket, payload: schemas.SubtaskCreate, created_by_id: uuid.UUID
+) -> models.Ticket:
+    subtask = models.Ticket(
+        title=payload.title,
+        ticket_type=models.TicketType.SUBTASK,
+        status=models.TicketStatus.TODO,
+        # Inherited from the parent, so a sub-task lands in the right product,
+        # sprint and client context without anyone re-entering it.
+        priority=parent.priority,
+        assignee_id=payload.assignee_id or parent.assignee_id,
+        component_id=parent.component_id,
+        client_name=parent.client_name,
+        sprint_id=parent.sprint_id,
+        parent_id=parent.id,
+        created_by_id=created_by_id,
+        rank=_top_rank(db, models.TicketStatus.TODO),
+    )
+    db.add(subtask)
+    db.flush()
+    log_activity(db, parent.id, created_by_id, "subtask_added", subtask.title)
+    db.commit()
+    db.refresh(subtask)
+    attach_derived(db, [subtask])
+    return subtask
+
+
+# Copied on duplicate. Deliberately excludes status, rank, resolved_at and the
+# history — a duplicate is a NEW report of the same problem, not a clone of how
+# far the original got.
+DUPLICATE_FIELDS = (
+    "title", "description", "priority", "ticket_type", "story_points",
+    "assignee_id", "sprint_id", "epic_id", "component_id", "client_name",
+    "due_date",
+)
+
+
+def duplicate_ticket(db: Session, ticket: models.Ticket, created_by_id: uuid.UUID) -> models.Ticket:
+    copy = models.Ticket(
+        **{f: getattr(ticket, f) for f in DUPLICATE_FIELDS},
+        created_by_id=created_by_id,
+        status=models.TicketStatus.TODO,
+        rank=_top_rank(db, models.TicketStatus.TODO),
+    )
+    copy.title = f"{ticket.title} (copy)"
+    copy.labels = list(ticket.labels)
+
+    db.add(copy)
+    db.flush()
+    log_activity(db, copy.id, created_by_id, "created", f"Duplicated from {ticket.key}")
+    db.commit()
+    db.refresh(copy)
+    attach_derived(db, [copy])
+    return copy
+
+
+def convert_to_epic(db: Session, ticket: models.Ticket, actor_id: uuid.UUID) -> models.Ticket:
+    old_type = ticket.ticket_type.value
+    ticket.ticket_type = models.TicketType.EPIC
+    ticket.epic_id = None  # an epic can't belong to another epic
+
+    # An epic can't own sub-tasks, so its sub-tasks are promoted to full tickets
+    # that belong to the new epic. Otherwise they'd be orphaned by the cascade.
+    for subtask in list(ticket.subtasks):
+        subtask.parent_id = None
+        subtask.epic_id = ticket.id
+        subtask.ticket_type = models.TicketType.TASK
+
+    log_activity(db, ticket.id, actor_id, "type_changed", f"{old_type} -> epic")
+    db.commit()
+    db.refresh(ticket)
+    attach_derived(db, [ticket])
     return ticket
 
 

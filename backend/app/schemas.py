@@ -215,6 +215,7 @@ class TicketCreate(BaseModel):
     assignee_id: Optional[uuid.UUID] = None
     sprint_id: Optional[uuid.UUID] = None
     epic_id: Optional[uuid.UUID] = None
+    parent_id: Optional[uuid.UUID] = None
     component_id: Optional[uuid.UUID] = None
     client_name: Optional[str] = Field(default=None, max_length=120)
     due_date: Optional[datetime] = None
@@ -231,11 +232,20 @@ class TicketUpdate(BaseModel):
     assignee_id: Optional[uuid.UUID] = None
     sprint_id: Optional[uuid.UUID] = None
     epic_id: Optional[uuid.UUID] = None
+    parent_id: Optional[uuid.UUID] = None
     component_id: Optional[uuid.UUID] = None
     client_name: Optional[str] = Field(default=None, max_length=120)
     due_date: Optional[datetime] = None
     # Omit to leave labels untouched; pass [] to clear them.
     label_ids: Optional[list[uuid.UUID]] = None
+
+
+class SubtaskCreate(BaseModel):
+    """Checklist-style: a title is enough. Everything else is inherited from the
+    parent, because a sub-task nobody can be bothered to file is a sub-task that
+    doesn't get filed."""
+    title: str = Field(min_length=1, max_length=200)
+    assignee_id: Optional[uuid.UUID] = None
 
 
 class TicketBulkUpdate(BaseModel):
@@ -276,6 +286,28 @@ class TicketMove(BaseModel):
     after_id: Optional[uuid.UUID] = None   # the card it lands below
 
 
+class SubtaskOut(BaseModel):
+    """A sub-task as seen from its parent. Deliberately NOT TicketOut — nesting
+    the full shape would recurse (a sub-task has a parent has sub-tasks...) and
+    balloon every board payload."""
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    key: str
+    title: str
+    status: TicketStatus
+    ticket_type: TicketType
+    assignee: Optional[UserOut]
+
+
+class EpicProgress(BaseModel):
+    """'6/10 done' — computed from the epic's children, never stored."""
+    done: int
+    total: int
+    points_done: int
+    points_total: int
+    percent: int
+
+
 class TicketOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -297,10 +329,14 @@ class TicketOut(BaseModel):
     client_name: Optional[str]
     sprint_id: Optional[uuid.UUID]
     epic_id: Optional[uuid.UUID]
+    parent_id: Optional[uuid.UUID]
+    subtasks: list[SubtaskOut] = []
     resolved_at: Optional[datetime]
     # Computed per request, not stored — see SLAOut. None when this priority
     # has no SLA configured.
     sla: Optional[SLAOut] = None
+    # Only populated on tickets of type=epic.
+    progress: Optional[EpicProgress] = None
     created_at: datetime
     updated_at: datetime
 

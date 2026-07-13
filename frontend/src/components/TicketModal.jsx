@@ -4,6 +4,7 @@ import { ticketsApi, commentsApi, errorMessage } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
 import LabelPicker from "./LabelPicker";
 import SlaBadge from "./SlaBadge";
+import SubtaskList from "./SubtaskList";
 import {
   COLUMNS,
   PRIORITIES,
@@ -148,6 +149,38 @@ export default function TicketModal({
       onClose();
     } catch (err) {
       setError(errorMessage(err, "Couldn't delete the ticket."));
+      setSaving(false);
+    }
+  }
+
+  async function handleDuplicate() {
+    setSaving(true);
+    setError("");
+    try {
+      const copy = await ticketsApi.duplicate(ticket.id);
+      onSaved(copy);
+      onClose();
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't duplicate that ticket."));
+      setSaving(false);
+    }
+  }
+
+  async function handleConvertToEpic() {
+    if (
+      !window.confirm(
+        `Convert ${ticket.key} to an epic? Its sub-tasks become full tickets grouped under it.`
+      )
+    )
+      return;
+    setSaving(true);
+    setError("");
+    try {
+      const saved = await ticketsApi.convertToEpic(ticket.id);
+      onSaved(saved);
+      onClose();
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't convert that ticket."));
       setSaving(false);
     }
   }
@@ -323,8 +356,26 @@ export default function TicketModal({
 
           {error && <p className="error-text" role="alert">{error}</p>}
 
+          {!isNew && ticket.progress && (
+            <div className="epic-progress-panel">
+              <div className="progress-track">
+                <div className="progress-fill" style={{ width: `${ticket.progress.percent}%` }} />
+              </div>
+              <div className="sprint-stats">
+                <span><strong>{ticket.progress.done}</strong>/{ticket.progress.total} tickets done</span>
+                <span><strong>{ticket.progress.points_done}</strong>/{ticket.progress.points_total} points</span>
+                <span>{ticket.progress.percent}%</span>
+              </div>
+            </div>
+          )}
+
           {!isNew && (
             <>
+              {/* Epics group tickets; only non-epics own sub-tasks. */}
+              {ticket.ticket_type !== "epic" && !ticket.parent_id && (
+                <SubtaskList ticket={ticket} users={users} onChanged={loadThread} />
+              )}
+
               <section className="modal-section">
                 <h4>Comments</h4>
                 {threadLoading ? (
@@ -394,6 +445,16 @@ export default function TicketModal({
           {!isNew && canDelete && (
             <button type="button" className="btn-danger" onClick={handleDelete} disabled={saving}>
               Delete
+            </button>
+          )}
+          {!isNew && (
+            <button type="button" className="btn-ghost" onClick={handleDuplicate} disabled={saving}>
+              Duplicate
+            </button>
+          )}
+          {!isNew && ticket.ticket_type !== "epic" && !ticket.parent_id && (
+            <button type="button" className="btn-ghost" onClick={handleConvertToEpic} disabled={saving}>
+              Convert to epic
             </button>
           )}
           <div className="spacer" />

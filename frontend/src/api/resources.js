@@ -20,6 +20,12 @@ export const ticketsApi = {
     apiClient.post("/tickets/bulk/delete", { ticket_ids: ticketIds }).then((r) => r.data),
   activity: (id) => apiClient.get(`/tickets/${id}/activity`).then((r) => r.data),
   clients: () => apiClient.get("/tickets/clients").then((r) => r.data),
+  epics: () => apiClient.get("/tickets/epics").then((r) => r.data),
+
+  addSubtask: (id, payload) =>
+    apiClient.post(`/tickets/${id}/subtasks`, payload).then((r) => r.data),
+  duplicate: (id) => apiClient.post(`/tickets/${id}/duplicate`).then((r) => r.data),
+  convertToEpic: (id) => apiClient.post(`/tickets/${id}/convert-to-epic`).then((r) => r.data),
 };
 
 export const commentsApi = {

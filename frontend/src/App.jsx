@@ -10,6 +10,7 @@ import Sprints from "./pages/Sprints";
 import Settings from "./pages/Settings";
 import Profile from "./pages/Profile";
 import Components from "./pages/Components";
+import Backlog from "./pages/Backlog";
 import Placeholder from "./pages/Placeholder";
 
 function ProtectedRoute({ children }) {
@@ -32,20 +33,7 @@ function AppRoutes() {
         }
       >
         <Route path="/board" element={<Board />} />
-        <Route
-          path="/backlog"
-          element={
-            <Placeholder
-              title="Backlog"
-              blurb="Groom and rank work that hasn't been pulled into a sprint yet."
-              planned={[
-                "Ranked list of every backlog ticket, drag to reorder",
-                "Drag a ticket straight into the active sprint",
-                "Inline estimation so you can point a whole backlog in one pass",
-              ]}
-            />
-          }
-        />
+        <Route path="/backlog" element={<Backlog />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/sprints" element={<Sprints />} />
         <Route path="/components" element={<Components />} />

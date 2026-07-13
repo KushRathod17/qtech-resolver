@@ -9,6 +9,8 @@ export const COLUMNS = [
 ];
 
 export const PRIORITIES = ["highest", "high", "medium", "low", "lowest"];
+// subtask is omitted from the pickers: you create one from its parent, never by
+// changing a loose ticket's type into an orphan with no parent.
 export const TICKET_TYPES = ["epic", "story", "task", "bug"];
 
 export const PRIORITY_LABELS = {
@@ -24,6 +26,7 @@ export const TYPE_LABELS = {
   story: "Story",
   task: "Task",
   bug: "Bug",
+  subtask: "Sub-task",
 };
 
 /** Ticket-type icon: colour + glyph, mirroring Jira's shorthand. */
@@ -33,6 +36,7 @@ export function TypeIcon({ type, size = 16 }) {
     story: { fill: "#5FB88A", glyph: <path d="M4.5 4.5h7v7h-7z M6 7.2l1.4 1.4L10 6" /> },
     task: { fill: "#4C9AFF", glyph: <path d="M4.5 7.6l2 2 4-4.2" /> },
     bug: { fill: "#E5484D", glyph: <circle cx="8" cy="8" r="3" /> },
+    subtask: { fill: "#06B6D4", glyph: <path d="M5 5v4a2 2 0 002 2h4" /> },
   }[type] || { fill: "#8792A6", glyph: <circle cx="8" cy="8" r="3" /> };
 
   return (

@@ -71,6 +71,23 @@ export function TicketCardBody({ ticket, dragging = false, selected = false }) {
         </div>
       )}
 
+      {ticket.progress && ticket.progress.total > 0 && (
+        <div className="epic-progress" title={`${ticket.progress.points_done}/${ticket.progress.points_total} points`}>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${ticket.progress.percent}%` }} />
+          </div>
+          <span className="epic-progress-label">
+            {ticket.progress.done}/{ticket.progress.total} done
+          </span>
+        </div>
+      )}
+
+      {ticket.subtasks.length > 0 && (
+        <div className="subtask-count" title="Sub-tasks complete">
+          ☑ {ticket.subtasks.filter((s) => s.status === "done").length}/{ticket.subtasks.length}
+        </div>
+      )}
+
       <div className="ticket-meta">
         <div className="ticket-meta-left">
           <TypeIcon type={ticket.ticket_type} />

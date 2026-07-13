@@ -1955,3 +1955,194 @@
 }
 .component-lead .filter-select { flex: 1; }
 
+
+/* ==========================================================================
+   Epics & sub-tasks
+   ========================================================================== */
+.epic-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.epic-progress .progress-track {
+  flex: 1;
+  height: 5px;
+}
+.epic-progress-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-faint);
+  white-space: nowrap;
+}
+
+.epic-progress-panel {
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-alt);
+  border: 1px solid var(--color-border);
+}
+.epic-progress-panel .sprint-stats { margin-top: 8px; }
+
+.subtask-count {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-text-faint);
+}
+
+.subtask-tally {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-faint);
+  margin-left: 4px;
+}
+
+.subtask-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+
+.subtask-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+}
+.subtask-row:last-child { border-bottom: none; }
+
+.subtask-row input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--color-accent);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.subtask-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text);
+}
+
+.subtask-row.done .subtask-title {
+  text-decoration: line-through;
+  color: var(--color-text-faint);
+}
+
+.subtask-x {
+  opacity: 0;
+  font-size: 10px;
+  padding: 2px 4px;
+}
+.subtask-row:hover .subtask-x { opacity: 1; }
+
+/* ==========================================================================
+   Backlog
+   ========================================================================== */
+.backlog-page {
+  padding: 24px 28px 40px;
+}
+
+.backlog-page .page-head {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.backlog-layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1080px) {
+  .backlog-layout { grid-template-columns: 1fr; }
+}
+
+.backlog-list-panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px 16px;
+}
+
+.backlog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.backlog-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: grab;
+}
+.backlog-row:last-child { border-bottom: none; }
+.backlog-row:hover { background: var(--color-panel-alt); }
+.backlog-row.dragging { opacity: 0.35; }
+
+.backlog-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  color: var(--color-text);
+}
+
+.dragging-overlay {
+  background: var(--color-panel-alt);
+  border: 1px solid var(--color-accent);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  cursor: grabbing;
+  padding: 10px 12px;
+}
+
+.sprint-targets {
+  position: sticky;
+  top: 16px;
+}
+
+.sprint-drop {
+  background: var(--color-panel);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.sprint-drop.over {
+  border-color: var(--color-accent);
+  border-style: solid;
+  background: rgba(62, 123, 250, 0.08);
+}
+
+.sprint-drop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.sprint-drop-head strong { font-size: 13.5px; }
+
+.sprint-drop-hint {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--color-text-faint);
+}
+

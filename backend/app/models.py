@@ -7,7 +7,7 @@ from sqlalchemy import (
     Table, Sequence, Enum as SAEnum
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 
 from .database import Base
 
@@ -43,6 +43,7 @@ class TicketType(str, enum.Enum):
     STORY = "story"
     TASK = "task"
     BUG = "bug"
+    SUBTASK = "subtask"
 
 
 class SprintState(str, enum.Enum):
@@ -178,6 +179,10 @@ class Ticket(Base):
     # An epic is itself a Ticket (type=epic); children point back at it.
     epic_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="SET NULL"), nullable=True)
 
+    # A sub-task's parent. Distinct from epic_id: an epic groups a body of work
+    # loosely, a parent OWNS its sub-tasks — delete the parent and they go too.
+    parent_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -185,7 +190,17 @@ class Ticket(Base):
     reporter = relationship("User", back_populates="tickets_reported", foreign_keys=[created_by_id])
     sprint = relationship("Sprint", back_populates="tickets")
     component = relationship("Component", back_populates="tickets", lazy="joined")
-    epic = relationship("Ticket", remote_side=[id], backref="children")
+    epic = relationship(
+        "Ticket", remote_side=[id], foreign_keys=[epic_id], backref="epic_children"
+    )
+    subtasks = relationship(
+        "Ticket",
+        foreign_keys=[parent_id],
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="Ticket.rank",
+        backref=backref("parent", remote_side=[id]),
+    )
     labels = relationship("Label", secondary=ticket_labels, back_populates="tickets", lazy="selectin")
     comments = relationship("Comment", back_populates="ticket", cascade="all, delete-orphan")
     activity_logs = relationship("ActivityLog", back_populates="ticket", cascade="all, delete-orphan")
