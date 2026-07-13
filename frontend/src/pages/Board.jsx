@@ -10,10 +10,11 @@ import {
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 
-import { ticketsApi, labelsApi, usersApi, errorMessage } from "../api/resources";
+import { ticketsApi, labelsApi, usersApi, sprintsApi, errorMessage } from "../api/resources";
 import { COLUMNS } from "../board/constants";
 import BoardColumn from "../components/BoardColumn";
 import BoardToolbar from "../components/BoardToolbar";
+import BulkActionBar from "../components/BulkActionBar";
 import { TicketCardBody } from "../components/TicketCard";
 import TicketModal from "../components/TicketModal";
 
@@ -29,6 +30,11 @@ export default function Board() {
   const [tickets, setTickets] = useState([]);
   const [users, setUsers] = useState([]);
   const [labels, setLabels] = useState([]);
+  const [sprints, setSprints] = useState([]);
+
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const anchorId = useRef(null); // for shift-click range selection
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -67,12 +73,22 @@ export default function Board() {
 
   // Reference data only needs fetching once.
   useEffect(() => {
-    Promise.all([usersApi.list(), labelsApi.list()])
-      .then(([u, l]) => {
+    Promise.all([usersApi.list(), labelsApi.list(), sprintsApi.list()])
+      .then(([u, l, s]) => {
         setUsers(u);
         setLabels(l);
+        setSprints(s);
       })
-      .catch((err) => setError(errorMessage(err, "Couldn't load users and labels.")));
+      .catch((err) => setError(errorMessage(err, "Couldn't load users, labels and sprints.")));
+  }, []);
+
+  // Escape is the universal "never mind" — it should drop a selection too.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") setSelectedIds(new Set());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const byColumn = useMemo(() => {
@@ -158,6 +174,69 @@ export default function Board() {
     }
   }
 
+  function handleSelect(ticket, event) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+
+      // Shift extends from the last-clicked card, but only within one column —
+      // a "range" spanning two columns has no meaningful order to walk.
+      const anchor = tickets.find((t) => t.id === anchorId.current);
+      if (event.shiftKey && anchor && anchor.status === ticket.status) {
+        const column = byColumn[ticket.status] || [];
+        const from = column.findIndex((t) => t.id === anchor.id);
+        const to = column.findIndex((t) => t.id === ticket.id);
+        if (from !== -1 && to !== -1) {
+          for (const t of column.slice(Math.min(from, to), Math.max(from, to) + 1)) {
+            next.add(t.id);
+          }
+          return next;
+        }
+      }
+
+      if (next.has(ticket.id)) next.delete(ticket.id);
+      else next.add(ticket.id);
+      anchorId.current = ticket.id;
+      return next;
+    });
+  }
+
+  async function handleBulkApply(changes) {
+    const ids = [...selectedIds];
+    setBulkBusy(true);
+    setError("");
+    try {
+      const updated = await ticketsApi.bulkUpdate({ ticket_ids: ids, ...changes });
+      setTickets((prev) => {
+        const byId = new Map(updated.map((t) => [t.id, t]));
+        return prev.map((t) => byId.get(t.id) || t);
+      });
+      setSelectedIds(new Set());
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't apply that to the selection."));
+      // The server may have applied nothing; refetch rather than guess.
+      loadTickets();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkDelete() {
+    const ids = [...selectedIds];
+    if (!window.confirm(`Delete ${ids.length} ticket${ids.length === 1 ? "" : "s"}? This cannot be undone.`))
+      return;
+    setBulkBusy(true);
+    try {
+      await ticketsApi.bulkDelete(ids);
+      setTickets((prev) => prev.filter((t) => !selectedIds.has(t.id)));
+      setSelectedIds(new Set());
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't delete the selection."));
+      loadTickets();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   function upsert(saved) {
     setTickets((prev) =>
       prev.some((t) => t.id === saved.id)
@@ -213,6 +292,8 @@ export default function Board() {
                 column={column}
                 tickets={byColumn[column.key] || []}
                 onOpen={setOpenTicket}
+                onSelect={handleSelect}
+                selectedIds={selectedIds}
               />
             ))}
           </div>
@@ -221,6 +302,19 @@ export default function Board() {
             {activeTicket && <TicketCardBody ticket={activeTicket} dragging />}
           </DragOverlay>
         </DndContext>
+      )}
+
+      {selectedIds.size > 0 && (
+        <BulkActionBar
+          count={selectedIds.size}
+          users={users}
+          labels={labels}
+          sprints={sprints}
+          busy={bulkBusy}
+          onApply={handleBulkApply}
+          onDelete={handleBulkDelete}
+          onClear={() => setSelectedIds(new Set())}
+        />
       )}
 
       {(openTicket || creating) && (

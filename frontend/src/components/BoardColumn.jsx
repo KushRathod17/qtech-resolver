@@ -3,7 +3,7 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 
 import TicketCard from "./TicketCard";
 
-export default function BoardColumn({ column, tickets, onOpen }) {
+export default function BoardColumn({ column, tickets, onOpen, onSelect, selectedIds }) {
   // Droppable in its own right, so a card can be dropped into an empty column
   // where there is no sortable item to land next to.
   const { setNodeRef, isOver } = useDroppable({
@@ -29,7 +29,13 @@ export default function BoardColumn({ column, tickets, onOpen }) {
           strategy={verticalListSortingStrategy}
         >
           {tickets.map((t) => (
-            <TicketCard key={t.id} ticket={t} onOpen={onOpen} />
+            <TicketCard
+              key={t.id}
+              ticket={t}
+              onOpen={onOpen}
+              onSelect={onSelect}
+              selected={selectedIds.has(t.id)}
+            />
           ))}
         </SortableContext>
 

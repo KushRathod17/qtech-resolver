@@ -14,6 +14,10 @@ export const ticketsApi = {
   // Drag-and-drop: land in `status`, between before_id and after_id.
   move: (id, payload) => apiClient.patch(`/tickets/${id}/move`, payload).then((r) => r.data),
   remove: (id) => apiClient.delete(`/tickets/${id}`),
+  // One request for the whole selection, not one per ticket.
+  bulkUpdate: (payload) => apiClient.patch("/tickets/bulk", payload).then((r) => r.data),
+  bulkDelete: (ticketIds) =>
+    apiClient.post("/tickets/bulk/delete", { ticket_ids: ticketIds }).then((r) => r.data),
   activity: (id) => apiClient.get(`/tickets/${id}/activity`).then((r) => r.data),
 };
 

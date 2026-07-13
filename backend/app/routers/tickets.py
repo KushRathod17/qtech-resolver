@@ -6,10 +6,37 @@ from sqlalchemy.orm import Session
 
 from ..dependencies import get_db, get_current_user, require_role
 from ..models import User, UserRole, TicketStatus, TicketPriority, TicketType
-from ..schemas import TicketCreate, TicketUpdate, TicketMove, TicketOut, ActivityLogOut
+from ..schemas import (
+    TicketCreate, TicketUpdate, TicketMove, TicketOut, ActivityLogOut,
+    TicketBulkUpdate, TicketBulkDelete,
+)
 from .. import crud
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
+
+
+# Declared before /{ticket_id} so "bulk" is never parsed as a ticket UUID.
+@router.patch("/bulk", response_model=list[TicketOut])
+def bulk_update_tickets(
+    payload: TicketBulkUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Apply one change set to many tickets in a single transaction."""
+    updated = crud.bulk_update_tickets(db, payload, actor_id=current_user.id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="None of those tickets exist")
+    return updated
+
+
+@router.post("/bulk/delete", status_code=status.HTTP_200_OK)
+def bulk_delete_tickets(
+    payload: TicketBulkDelete,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
+):
+    deleted = crud.bulk_delete_tickets(db, payload.ticket_ids)
+    return {"deleted": deleted}
 
 
 @router.get("/", response_model=list[TicketOut])

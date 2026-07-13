@@ -143,6 +143,34 @@ class TicketUpdate(BaseModel):
     label_ids: Optional[list[uuid.UUID]] = None
 
 
+class TicketBulkUpdate(BaseModel):
+    """Apply the same change to many tickets at once.
+
+    Any field left out is untouched. Labels are additive/subtractive rather
+    than a replacement set — on a bulk edit you almost always mean "tag these
+    as Payments too", not "make Payments their only label".
+    """
+    ticket_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+    status: Optional[TicketStatus] = None
+    priority: Optional[TicketPriority] = None
+    ticket_type: Optional[TicketType] = None
+    story_points: Optional[int] = Field(default=None, ge=0, le=100)
+    # Explicit null clears the field, so these need to distinguish
+    # "not supplied" from "set to nothing".
+    assignee_id: Optional[uuid.UUID] = None
+    clear_assignee: bool = False
+    sprint_id: Optional[uuid.UUID] = None
+    clear_sprint: bool = False
+
+    add_label_ids: list[uuid.UUID] = Field(default_factory=list)
+    remove_label_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class TicketBulkDelete(BaseModel):
+    ticket_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+
 class TicketMove(BaseModel):
     """Drag-and-drop: which column, and between which two neighbours."""
     status: TicketStatus

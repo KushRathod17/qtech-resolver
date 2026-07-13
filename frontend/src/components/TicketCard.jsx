@@ -68,7 +68,7 @@ export function TicketCardBody({ ticket, dragging = false, selected = false }) {
   );
 }
 
-export default function TicketCard({ ticket, onOpen }) {
+export default function TicketCard({ ticket, onOpen, onSelect, selected }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
     data: { ticket },
@@ -81,20 +81,37 @@ export default function TicketCard({ ticket, onOpen }) {
     opacity: isDragging ? 0 : 1,
   };
 
+  // A modified click means "select", a plain click means "open". Without this
+  // split you'd have to choose between the two, and a checkbox on every card
+  // is a lot of chrome for something used occasionally.
+  const handleClick = (e) => {
+    if (e.shiftKey || e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      onSelect(ticket, e);
+    } else {
+      onOpen(ticket);
+    }
+  };
+
   return (
     <div
       ref={setNodeRef}
       style={style}
       {...attributes}
       {...listeners}
-      onClick={() => onOpen(ticket)}
+      onClick={handleClick}
       role="button"
       tabIndex={0}
+      aria-pressed={selected}
       onKeyDown={(e) => {
         if (e.key === "Enter") onOpen(ticket);
+        if (e.key === " ") {
+          e.preventDefault();
+          onSelect(ticket, e);
+        }
       }}
     >
-      <TicketCardBody ticket={ticket} />
+      <TicketCardBody ticket={ticket} selected={selected} />
     </div>
   );
 }

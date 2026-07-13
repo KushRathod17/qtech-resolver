@@ -79,9 +79,14 @@ export default function BoardToolbar({
         )}
       </div>
 
-      <button type="button" className="btn-primary" onClick={onNewTicket}>
-        + New Ticket
-      </button>
+      <div className="toolbar-right">
+        <span className="select-hint">
+          <kbd>Ctrl</kbd>/<kbd>Shift</kbd>+click to multi-select
+        </span>
+        <button type="button" className="btn-primary" onClick={onNewTicket}>
+          + New Ticket
+        </button>
+      </div>
     </div>
   );
 }

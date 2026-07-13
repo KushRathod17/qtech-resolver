@@ -360,6 +360,87 @@ def update_ticket(
     return ticket
 
 
+def bulk_update_tickets(
+    db: Session, bulk: schemas.TicketBulkUpdate, actor_id: uuid.UUID
+) -> list[models.Ticket]:
+    """Apply one change set to many tickets in a single transaction.
+
+    Either the whole batch lands or none of it does — a half-applied bulk edit
+    is worse than a failed one, because you can't tell what to retry.
+    """
+    tickets = _ticket_query(db).filter(models.Ticket.id.in_(bulk.ticket_ids)).all()
+    if not tickets:
+        return []
+
+    add_labels = _resolve_labels(db, bulk.add_label_ids)
+    remove_ids = set(bulk.remove_label_ids)
+
+    # Every ticket moving to the same column would otherwise collide on one
+    # rank; walk the gap so they stack in the order they were selected.
+    next_rank = _top_rank(db, bulk.status) if bulk.status else None
+
+    for ticket in tickets:
+        if bulk.status and bulk.status != ticket.status:
+            log_activity(db, ticket.id, actor_id, "status_changed",
+                         f"{ticket.status.value} -> {bulk.status.value}")
+            ticket.status = bulk.status
+            ticket.rank = next_rank
+            next_rank -= RANK_GAP
+
+        if bulk.priority and bulk.priority != ticket.priority:
+            log_activity(db, ticket.id, actor_id, "priority_changed",
+                         f"{ticket.priority.value} -> {bulk.priority.value}")
+            ticket.priority = bulk.priority
+
+        if bulk.ticket_type and bulk.ticket_type != ticket.ticket_type:
+            ticket.ticket_type = bulk.ticket_type
+
+        if bulk.story_points is not None and bulk.story_points != ticket.story_points:
+            log_activity(db, ticket.id, actor_id, "estimated",
+                         f"{ticket.story_points or '-'} -> {bulk.story_points} points")
+            ticket.story_points = bulk.story_points
+
+        if bulk.clear_assignee:
+            if ticket.assignee_id is not None:
+                log_activity(db, ticket.id, actor_id, "assigned", "Unassigned")
+                ticket.assignee_id = None
+        elif bulk.assignee_id and bulk.assignee_id != ticket.assignee_id:
+            assignee = get_user(db, bulk.assignee_id)
+            log_activity(db, ticket.id, actor_id, "assigned",
+                         f"Assigned to {assignee.full_name}" if assignee else "Assigned")
+            ticket.assignee_id = bulk.assignee_id
+
+        if bulk.clear_sprint:
+            ticket.sprint_id = None
+        elif bulk.sprint_id:
+            ticket.sprint_id = bulk.sprint_id
+
+        if add_labels or remove_ids:
+            current = {l.id: l for l in ticket.labels}
+            for label in add_labels:
+                current[label.id] = label
+            for label_id in remove_ids:
+                current.pop(label_id, None)
+
+            if set(current) != {l.id for l in ticket.labels}:
+                ticket.labels = list(current.values())
+                log_activity(db, ticket.id, actor_id, "labels_changed",
+                             ", ".join(l.name for l in ticket.labels) or "Labels cleared")
+
+    db.commit()
+    for ticket in tickets:
+        db.refresh(ticket)
+    return tickets
+
+
+def bulk_delete_tickets(db: Session, ticket_ids: list[uuid.UUID]) -> int:
+    tickets = db.query(models.Ticket).filter(models.Ticket.id.in_(ticket_ids)).all()
+    for ticket in tickets:
+        db.delete(ticket)
+    db.commit()
+    return len(tickets)
+
+
 def move_ticket(db: Session, ticket: models.Ticket, move: schemas.TicketMove, actor_id: uuid.UUID) -> models.Ticket:
     """Drag-and-drop: set the column, and position between two neighbours."""
     before = get_ticket(db, move.before_id) if move.before_id else None
