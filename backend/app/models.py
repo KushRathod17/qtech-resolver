@@ -52,6 +52,38 @@ class SprintState(str, enum.Enum):
     COMPLETED = "completed"
 
 
+class TeamKind(str, enum.Enum):
+    """What a team DOES, as opposed to what it's called.
+
+    The workflow state machine keys off this, never off the team's name — so
+    "Testing/QA" can be renamed, or a second testing team added, without
+    rewriting the routing rules.
+    """
+    SUPPORT = "support"          # raises tickets, and closes them
+    TESTING = "testing"          # reproduces, and verifies fixes
+    DEVELOPMENT = "development"  # fixes
+    OTHER = "other"              # extensible: teams outside the bug workflow
+
+
+class HandoffAction(str, enum.Enum):
+    """Deliberately NOT a Postgres enum — stored as a plain string.
+
+    Every other enum here is a real PG enum, but adding a value to one needs a
+    hand-written ALTER TYPE inside an autocommit_block, and Alembic's
+    autogenerate silently skips it (that's how 'SUBTASK' nearly shipped
+    missing). Workflow actions are the likeliest thing in this schema to grow —
+    'escalated', 'wont_fix', 'duplicate' — so adding one should cost zero
+    migrations.
+    """
+    RAISED = "raised"
+    FORWARDED = "forwarded"                                # testing -> development
+    RETURNED_NOT_REPRODUCIBLE = "returned_not_reproducible"  # testing -> reporter
+    FIXED_RETURNED_TO_TESTING = "fixed_returned_to_testing"  # development -> testing
+    VERIFIED_RETURNED_TO_REPORTER = "verified_returned_to_reporter"  # testing -> reporter
+    RETURNED_STILL_BROKEN = "returned_still_broken"        # testing -> development
+    RESOLVED = "resolved"                                  # reporter closes it
+
+
 # Many-to-many: a ticket can carry several labels, a label spans many tickets.
 ticket_labels = Table(
     "ticket_labels",
@@ -81,7 +113,13 @@ class User(Base):
     # Null means "fall back to generated initials", which is the common case.
     avatar_url = Column(String, nullable=True)
     theme = Column(String, nullable=False, server_default="dark")
+    # Nullable: existing accounts predate teams, and guessing which team someone
+    # belongs to would be fabricating data. Until it's set, they can't act on
+    # the workflow — which is honest rather than broken.
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    team = relationship("Team", back_populates="members")
 
     tickets_assigned = relationship("Ticket", back_populates="assignee", foreign_keys="Ticket.assignee_id")
     tickets_reported = relationship("Ticket", back_populates="reporter", foreign_keys="Ticket.created_by_id")
@@ -98,6 +136,54 @@ class Label(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     tickets = relationship("Ticket", secondary=ticket_labels, back_populates="labels")
+
+
+class Team(Base):
+    """An org group a person belongs to — Contact/Support, Testing/QA,
+    Development. Distinct from Component (which part of the PRODUCT a ticket
+    touches) and from Role (what permissions you hold)."""
+    __tablename__ = "teams"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, unique=True, nullable=False, index=True)
+    kind = Column(SAEnum(TeamKind), nullable=False, default=TeamKind.OTHER)
+    description = Column(Text, nullable=True)
+    color = Column(String, nullable=False, default="#3E7BFA")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    members = relationship("User", back_populates="team")
+
+
+class TicketHandoff(Base):
+    """One custody interval in a ticket's chain of custody.
+
+    A row says "X on team A handed this to Y on team B at T". Y's custody then
+    runs until the NEXT row's sent_at — which is why received_at and
+    duration_held are derived rather than stored: storing them would duplicate
+    the neighbouring row's timestamp and let the two drift.
+    """
+    __tablename__ = "ticket_handoffs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"),
+                       nullable=False, index=True)
+
+    # Null on the initial raise — the ticket came from nowhere.
+    from_team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
+    from_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    to_team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
+    to_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    action = Column(String, nullable=False)   # HandoffAction — see the docstring there
+    note = Column(Text, nullable=True)        # the handler's contribution
+    sent_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    ticket = relationship("Ticket", back_populates="handoffs")
+    from_team = relationship("Team", foreign_keys=[from_team_id])
+    to_team = relationship("Team", foreign_keys=[to_team_id])
+    from_user = relationship("User", foreign_keys=[from_user_id])
+    to_user = relationship("User", foreign_keys=[to_user_id])
 
 
 class Component(Base):
@@ -186,6 +272,12 @@ class Ticket(Base):
     created_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     sprint_id = Column(UUID(as_uuid=True), ForeignKey("sprints.id", ondelete="SET NULL"), nullable=True)
     component_id = Column(UUID(as_uuid=True), ForeignKey("components.id", ondelete="SET NULL"), nullable=True)
+
+    # Which team is holding this RIGHT NOW. Always mirrors the latest handoff.
+    # There is deliberately no current_assignee_id — assignee_id already is it,
+    # and two fields that must agree will eventually disagree.
+    current_team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"),
+                             nullable=True, index=True)
     # An epic is itself a Ticket (type=epic); children point back at it.
     epic_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="SET NULL"), nullable=True)
 
@@ -200,6 +292,13 @@ class Ticket(Base):
     reporter = relationship("User", back_populates="tickets_reported", foreign_keys=[created_by_id])
     sprint = relationship("Sprint", back_populates="tickets")
     component = relationship("Component", back_populates="tickets", lazy="joined")
+    current_team = relationship("Team", foreign_keys=[current_team_id], lazy="joined")
+    handoffs = relationship(
+        "TicketHandoff",
+        back_populates="ticket",
+        cascade="all, delete-orphan",
+        order_by="TicketHandoff.sent_at",
+    )
     epic = relationship(
         "Ticket", remote_side=[id], foreign_keys=[epic_id], backref="epic_children"
     )

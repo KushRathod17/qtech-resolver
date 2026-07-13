@@ -5,7 +5,7 @@ from typing import Optional
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, joinedload
 
-from . import models, schemas
+from . import models, schemas, workflow
 from .security import hash_password
 
 # Gap left between adjacent cards. Dropping a card between two neighbours
@@ -257,6 +257,96 @@ def sprint_burndown(db: Session, sprint: models.Sprint) -> dict:
     return {"sprint": sprint, "total_points": total, "points": series}
 
 
+def workflow_report(db: Session) -> list[dict]:
+    """Every ticket in the cross-team workflow: where it is, how far it's
+    travelled, and how long it's been sitting where it is."""
+    now = datetime.utcnow()
+
+    tickets = (
+        _ticket_query(db)
+        .filter(models.Ticket.current_team_id.isnot(None))
+        .order_by(models.Ticket.created_at.desc())
+        .all()
+    )
+
+    rows = []
+    for t in tickets:
+        handoffs = t.handoffs  # ordered by sent_at
+        # Every team that ever HELD it (the receiver of each handoff).
+        touched = {h.to_team_id for h in handoffs if h.to_team_id}
+        last = handoffs[-1] if handoffs else None
+
+        rows.append({
+            "ticket_id": t.id,
+            "key": t.key,
+            "title": t.title,
+            "status": t.status,
+            "current_team": t.current_team,
+            "current_assignee": t.assignee,
+            "teams_touched": len(touched),
+            "handoff_count": len(handoffs),
+            "total_open_seconds": int(((t.resolved_at or now) - t.created_at).total_seconds()),
+            "seconds_since_last_handoff": (
+                int((now - last.sent_at).total_seconds()) if last else None
+            ),
+        })
+    return rows
+
+
+def team_holding_times(db: Session) -> list[dict]:
+    """How long each team sits on a ticket before passing it on.
+
+    A hold that hasn't ended yet is EXCLUDED from the average — otherwise a
+    ticket parked on someone's desk right now would keep dragging the mean
+    upward as the clock ticks, and the number would change every time you
+    refreshed the page. It's reported separately as `currently_holding`.
+    """
+    now = datetime.utcnow()
+    handoffs = (
+        db.query(models.TicketHandoff)
+        .order_by(models.TicketHandoff.ticket_id, models.TicketHandoff.sent_at)
+        .all()
+    )
+
+    # Group by ticket so we can pair each hold with the handoff that ended it.
+    by_ticket: dict[uuid.UUID, list[models.TicketHandoff]] = {}
+    for h in handoffs:
+        by_ticket.setdefault(h.ticket_id, []).append(h)
+
+    holds: dict[uuid.UUID, list[int]] = {}   # team_id -> completed durations
+    open_holds: dict[uuid.UUID, int] = {}    # team_id -> count still holding
+    tickets_seen: dict[uuid.UUID, set] = {}  # team_id -> ticket ids
+
+    for ticket_id, chain in by_ticket.items():
+        for i, h in enumerate(chain):
+            team_id = h.to_team_id
+            if not team_id:
+                continue  # a resolve has no receiving team
+
+            tickets_seen.setdefault(team_id, set()).add(ticket_id)
+
+            nxt = chain[i + 1] if i + 1 < len(chain) else None
+            if nxt:
+                holds.setdefault(team_id, []).append(
+                    int((nxt.sent_at - h.sent_at).total_seconds())
+                )
+            else:
+                open_holds[team_id] = open_holds.get(team_id, 0) + 1
+
+    rows = []
+    for team in get_teams(db):
+        durations = holds.get(team.id, [])
+        rows.append({
+            "team": team,
+            "tickets_handled": len(tickets_seen.get(team.id, set())),
+            "completed_holds": len(durations),
+            "average_hold_seconds": (sum(durations) / len(durations)) if durations else None,
+            "longest_hold_seconds": max(durations) if durations else None,
+            "currently_holding": open_holds.get(team.id, 0),
+        })
+    return rows
+
+
 def velocity(db: Session) -> dict:
     sprints = sorted(get_sprints(db), key=lambda s: (s.start_date or date.min, s.created_at))
 
@@ -278,6 +368,246 @@ def velocity(db: Session) -> dict:
     average = sum(e["completed_points"] for e in finished) / len(finished) if finished else 0.0
 
     return {"sprints": entries, "average_velocity": round(average, 1)}
+
+
+# ---------- Teams ----------
+def get_teams(db: Session) -> list[models.Team]:
+    return db.query(models.Team).order_by(models.Team.name).all()
+
+
+def get_team(db: Session, team_id: uuid.UUID) -> models.Team | None:
+    return db.query(models.Team).filter(models.Team.id == team_id).first()
+
+
+def get_team_by_kind(db: Session, kind: models.TeamKind) -> models.Team | None:
+    """First team of a given kind. Used to route 'send to Testing' without
+    hardcoding a team name."""
+    return (
+        db.query(models.Team)
+        .filter(models.Team.kind == kind)
+        .order_by(models.Team.created_at)
+        .first()
+    )
+
+
+def get_team_by_name(db: Session, name: str) -> models.Team | None:
+    return db.query(models.Team).filter(func.lower(models.Team.name) == name.lower()).first()
+
+
+def get_team_members(db: Session, team_id: uuid.UUID) -> list[models.User]:
+    return (
+        db.query(models.User)
+        .filter(models.User.team_id == team_id)
+        .order_by(models.User.full_name)
+        .all()
+    )
+
+
+def create_team(db: Session, payload: schemas.TeamCreate) -> models.Team:
+    team = models.Team(**payload.model_dump())
+    db.add(team)
+    db.commit()
+    db.refresh(team)
+    return team
+
+
+def update_team(db: Session, team: models.Team, payload: schemas.TeamUpdate) -> models.Team:
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(team, field, value)
+    db.commit()
+    db.refresh(team)
+    return team
+
+
+def delete_team(db: Session, team: models.Team) -> None:
+    db.delete(team)
+    db.commit()
+
+
+def set_user_team(db: Session, user: models.User, team_id: uuid.UUID | None) -> models.User:
+    user.team_id = team_id
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+# ---------- Workflow / handoffs ----------
+def get_handoffs(db: Session, ticket_id: uuid.UUID) -> list[models.TicketHandoff]:
+    return (
+        db.query(models.TicketHandoff)
+        .options(
+            joinedload(models.TicketHandoff.from_user),
+            joinedload(models.TicketHandoff.to_user),
+            joinedload(models.TicketHandoff.from_team),
+            joinedload(models.TicketHandoff.to_team),
+        )
+        .filter(models.TicketHandoff.ticket_id == ticket_id)
+        .order_by(models.TicketHandoff.sent_at)
+        .all()
+    )
+
+
+def build_timeline(handoffs: list[models.TicketHandoff]) -> list[dict]:
+    """Turn the raw chain into the chain-of-custody report.
+
+    Row i's receiver held the ticket from row i's sent_at until row i+1's
+    sent_at. The last row is still open — its holder has it now.
+    """
+    rows = []
+    for i, h in enumerate(handoffs):
+        nxt = handoffs[i + 1] if i + 1 < len(handoffs) else None
+        handed_off_at = nxt.sent_at if nxt else None
+
+        rows.append({
+            "id": h.id,
+            "action": h.action,
+            "note": h.note,
+            "from_team": h.from_team,
+            "from_user": h.from_user,
+            "to_team": h.to_team,
+            "to_user": h.to_user,
+            "sent_at": h.sent_at,
+            # The receiver took custody the moment it was sent. We don't track
+            # acknowledgement yet — see HandoffOut.
+            "received_at": h.sent_at,
+            "handed_off_at": handed_off_at,
+            "duration_held_seconds": (
+                int((handed_off_at - h.sent_at).total_seconds()) if handed_off_at else None
+            ),
+            "is_current": nxt is None,
+        })
+    return rows
+
+
+def _resolve_handoff_target(
+    db: Session, ticket: models.Ticket, spec, to_user_id: uuid.UUID | None
+) -> tuple[models.User | None, models.Team | None]:
+    """Who gets it next.
+
+    A spec with no target_kind routes back to the ORIGINAL reporter — reusing
+    created_by_id rather than duplicating the reporter on the ticket.
+    """
+    if spec.action == models.HandoffAction.RESOLVED:
+        return None, None
+
+    if spec.target_kind is None:
+        reporter = get_user(db, ticket.created_by_id)
+        return reporter, (reporter.team if reporter else None)
+
+    if not to_user_id:
+        raise ValueError("This action needs a person to hand the ticket to")
+
+    target = get_user(db, to_user_id)
+    if not target:
+        raise ValueError("That person doesn't exist")
+    if not target.team:
+        raise ValueError(f"{target.full_name} isn't on a team yet — assign one in Settings")
+    if target.team.kind != spec.target_kind:
+        raise ValueError(
+            f"{target.full_name} is on {target.team.name}, "
+            f"but this action hands off to a {spec.target_kind.value} team"
+        )
+    return target, target.team
+
+
+def perform_handoff(
+    db: Session, ticket: models.Ticket, actor: models.User, spec, payload: schemas.HandoffCreate
+) -> models.Ticket:
+    """Record one link in the chain and move the ticket. The caller has already
+    checked that `spec` is an action the actor is allowed to take."""
+    if spec.note_required and not (payload.note or "").strip():
+        raise ValueError("This action needs a note explaining what you found")
+
+    target_user, target_team = _resolve_handoff_target(db, ticket, spec, payload.to_user_id)
+
+    handoff = models.TicketHandoff(
+        ticket_id=ticket.id,
+        from_team_id=ticket.current_team_id,
+        from_user_id=actor.id,
+        to_team_id=target_team.id if target_team else None,
+        to_user_id=target_user.id if target_user else None,
+        action=spec.action.value,
+        note=(payload.note or "").strip() or None,
+    )
+    db.add(handoff)
+
+    # The ticket always mirrors the latest handoff.
+    if spec.action == models.HandoffAction.RESOLVED:
+        # Custody ends. Keep the team so the report still shows where it landed.
+        pass
+    else:
+        ticket.current_team_id = target_team.id if target_team else None
+        ticket.assignee_id = target_user.id if target_user else None
+
+    if spec.resulting_status != ticket.status:
+        ticket.rank = _top_rank(db, spec.resulting_status)
+        _sync_resolved_at(ticket, spec.resulting_status)
+        ticket.status = spec.resulting_status
+
+    # Echo into the existing activity feed so the ticket's history stays whole.
+    # The handoff table is the source of truth; this row is a projection.
+    detail = spec.label
+    if target_user:
+        detail = f"{spec.label} — {target_user.full_name}"
+    log_activity(db, ticket.id, actor.id, "handoff", detail)
+
+    db.commit()
+    db.refresh(ticket)
+    attach_derived(db, [ticket])
+    return ticket
+
+
+def raise_into_workflow(
+    db: Session, ticket: models.Ticket, actor: models.User, to_user: models.User, note: str | None
+) -> models.Ticket:
+    """The initial handoff: from nobody, to the first handler."""
+    handoff = models.TicketHandoff(
+        ticket_id=ticket.id,
+        from_team_id=actor.team_id,
+        from_user_id=actor.id,
+        to_team_id=to_user.team_id,
+        to_user_id=to_user.id,
+        action=models.HandoffAction.RAISED.value,
+        note=(note or "").strip() or None,
+    )
+    db.add(handoff)
+
+    ticket.current_team_id = to_user.team_id
+    ticket.assignee_id = to_user.id
+
+    log_activity(db, ticket.id, actor.id, "handoff", f"Raised → {to_user.full_name}")
+    db.commit()
+    db.refresh(ticket)
+    return ticket
+
+
+def attach_workflow(db: Session, tickets: list[models.Ticket], viewer: models.User):
+    """Hang each ticket's available_actions off it, FOR THIS VIEWER.
+
+    Can't live in attach_derived: the answer depends on who's asking, so it has
+    to be computed per request rather than per ticket.
+    """
+    # Resolve target teams once, not once per ticket.
+    team_by_kind = {
+        kind: get_team_by_kind(db, kind)
+        for kind in (models.TeamKind.TESTING, models.TeamKind.DEVELOPMENT, models.TeamKind.SUPPORT)
+    }
+
+    for ticket in tickets:
+        specs = workflow.available_actions(ticket, viewer)
+        ticket.available_actions = [
+            {
+                "action": s.action,
+                "label": s.label,
+                # None target_kind means "back to the reporter" — the UI doesn't
+                # pick a person for that, so there's no team to show.
+                "target_team": team_by_kind.get(s.target_kind) if s.target_kind else None,
+                "note_required": s.note_required,
+            }
+            for s in specs
+        ]
+        ticket.handoff_count = len(ticket.handoffs)
+    return tickets
 
 
 # ---------- Components ----------
@@ -469,6 +799,7 @@ def get_tickets(
     label_id: Optional[uuid.UUID] = None,
     component_id: Optional[uuid.UUID] = None,
     client_name: Optional[str] = None,
+    current_team_id: Optional[uuid.UUID] = None,
     breached: Optional[bool] = None,
     watcher_id: Optional[uuid.UUID] = None,
     include_subtasks: bool = False,
@@ -497,6 +828,8 @@ def get_tickets(
         query = query.filter(models.Ticket.labels.any(models.Label.id == label_id))
     if component_id is not None:
         query = query.filter(models.Ticket.component_id == component_id)
+    if current_team_id is not None:
+        query = query.filter(models.Ticket.current_team_id == current_team_id)
     if watcher_id is not None:
         query = query.filter(models.Ticket.watchers.any(models.User.id == watcher_id))
     if client_name:
@@ -555,7 +888,9 @@ def _top_rank(db: Session, status: models.TicketStatus) -> float:
 
 
 def create_ticket(db: Session, ticket_in: schemas.TicketCreate, created_by_id: uuid.UUID) -> models.Ticket:
-    data = ticket_in.model_dump(exclude={"label_ids"})
+    # label_ids is a relationship, and the route_* fields drive the workflow
+    # handoff rather than being columns on the ticket.
+    data = ticket_in.model_dump(exclude={"label_ids", "route_to_user_id", "route_note"})
     db_ticket = models.Ticket(
         **data,
         created_by_id=created_by_id,

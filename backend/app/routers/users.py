@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..dependencies import get_db, get_current_user, require_role
 from ..models import User, UserRole
 from ..schemas import (
-    UserOut, UserRoleUpdate, UserUpdate, UserProfileOut, UserStats,
+    UserOut, UserRoleUpdate, UserTeamUpdate, UserUpdate, UserProfileOut, UserStats,
     PasswordChange, TicketOut,
 )
 from ..security import verify_password
@@ -131,6 +131,26 @@ def get_user_tickets(
     if not crud.get_user(db, user_id):
         raise HTTPException(status_code=404, detail="User not found")
     return crud.get_tickets(db, assignee_id=user_id)
+
+
+@router.patch("/{user_id}/team", response_model=UserOut)
+def update_user_team(
+    user_id: uuid.UUID,
+    payload: UserTeamUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
+):
+    """Which team someone belongs to. Separate from role: a person with
+    role=developer can sit on the Testing team, and an admin can sit on
+    Contact/Support."""
+    user = crud.get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if payload.team_id and not crud.get_team(db, payload.team_id):
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    return crud.set_user_team(db, user, payload.team_id)
 
 
 @router.patch("/{user_id}/role", response_model=UserOut)

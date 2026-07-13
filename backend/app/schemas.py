@@ -3,7 +3,10 @@ from datetime import datetime, date
 from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
-from .models import UserRole, TicketStatus, TicketPriority, TicketType, SprintState
+from .models import (
+    UserRole, TicketStatus, TicketPriority, TicketType, SprintState,
+    TeamKind, HandoffAction,
+)
 
 
 # ---------- Users ----------
@@ -22,6 +25,7 @@ class UserOut(BaseModel):
     role: UserRole
     avatar_url: Optional[str] = None
     theme: str = "dark"
+    team_id: Optional[uuid.UUID] = None
 
 
 class UserRoleUpdate(BaseModel):
@@ -84,6 +88,101 @@ class LabelOut(BaseModel):
     id: uuid.UUID
     name: str
     color: str
+
+
+# ---------- Teams ----------
+class TeamCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    kind: TeamKind = TeamKind.OTHER
+    description: Optional[str] = Field(default=None, max_length=300)
+    color: str = Field(default="#3E7BFA", pattern=HEX_COLOR)
+
+
+class TeamUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    kind: Optional[TeamKind] = None
+    description: Optional[str] = Field(default=None, max_length=300)
+    color: Optional[str] = Field(default=None, pattern=HEX_COLOR)
+
+
+class TeamOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    kind: TeamKind
+    description: Optional[str]
+    color: str
+
+
+class UserTeamUpdate(BaseModel):
+    # Null removes them from every team.
+    team_id: Optional[uuid.UUID] = None
+
+
+# ---------- Workflow / handoffs ----------
+class HandoffCreate(BaseModel):
+    action: HandoffAction
+    # Required when the action routes to another team; ignored when it routes
+    # back to the reporter (the server knows who that is) or resolves.
+    to_user_id: Optional[uuid.UUID] = None
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class HandoffOut(BaseModel):
+    """One link in the chain of custody.
+
+    received_at / handed_off_at / duration_held_seconds are DERIVED from the
+    neighbouring rows, never stored — storing them would duplicate a timestamp
+    that already exists and let the copies drift.
+    """
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    action: HandoffAction
+    note: Optional[str]
+
+    from_team: Optional[TeamOut]
+    from_user: Optional[UserOut]
+    to_team: Optional[TeamOut]
+    to_user: Optional[UserOut]
+
+    sent_at: datetime                       # when this handoff happened
+    received_at: datetime                   # when the RECEIVER took custody (= sent_at)
+    handed_off_at: Optional[datetime]       # when they passed it on (null = still holding)
+    duration_held_seconds: Optional[int]    # null while still holding
+    is_current: bool
+
+
+class AvailableAction(BaseModel):
+    """What the viewer may do. The UI renders its buttons from this list, so it
+    can never offer something the server would reject."""
+    action: HandoffAction
+    label: str
+    target_team: Optional[TeamOut]   # null = routes back to the reporter
+    note_required: bool
+
+
+class TicketWorkflowReport(BaseModel):
+    ticket_id: uuid.UUID
+    key: str
+    title: str
+    status: TicketStatus
+    current_team: Optional[TeamOut]
+    current_assignee: Optional[UserOut]
+    teams_touched: int
+    handoff_count: int
+    total_open_seconds: int
+    seconds_since_last_handoff: Optional[int]
+
+
+class TeamHoldingTime(BaseModel):
+    """Average time a team sits on a ticket before passing it on — the
+    bottleneck view."""
+    team: TeamOut
+    tickets_handled: int
+    completed_holds: int              # holds that have actually ended
+    average_hold_seconds: Optional[float]
+    longest_hold_seconds: Optional[int]
+    currently_holding: int
 
 
 # ---------- Components ----------
@@ -221,6 +320,12 @@ class TicketCreate(BaseModel):
     client_name: Optional[str] = Field(default=None, max_length=120)
     due_date: Optional[datetime] = None
     label_ids: list[uuid.UUID] = Field(default_factory=list)
+
+    # Cross-team workflow: send this to a specific person on a specific team at
+    # the moment it's raised. Both optional so tickets can still be created
+    # outside the workflow (the board, the palette, bulk import).
+    route_to_user_id: Optional[uuid.UUID] = None
+    route_note: Optional[str] = Field(default=None, max_length=2000)
 
 
 class TicketUpdate(BaseModel):
@@ -361,6 +466,11 @@ class TicketOut(BaseModel):
     labels: list[LabelOut]
     component: Optional[ComponentOut]
     client_name: Optional[str]
+    # Which team is holding it right now (null = not in the cross-team workflow).
+    current_team: Optional[TeamOut] = None
+    # What the CURRENT VIEWER may do to it. Empty when it isn't theirs to act on.
+    available_actions: list[AvailableAction] = []
+    handoff_count: int = 0
     sprint_id: Optional[uuid.UUID]
     epic_id: Optional[uuid.UUID]
     parent_id: Optional[uuid.UUID]

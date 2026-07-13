@@ -10,8 +10,9 @@ from ..models import User, UserRole, TicketStatus, TicketPriority, TicketType
 from ..schemas import (
     TicketCreate, TicketUpdate, TicketMove, TicketOut, ActivityLogOut,
     TicketBulkUpdate, TicketBulkDelete, SubtaskCreate, AttachmentOut,
+    HandoffCreate, HandoffOut,
 )
-from .. import crud
+from .. import crud, workflow
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -57,6 +58,9 @@ def list_tickets(
     label_id: Optional[uuid.UUID] = Query(default=None),
     component_id: Optional[uuid.UUID] = Query(default=None),
     client_name: Optional[str] = Query(default=None),
+    current_team_id: Optional[uuid.UUID] = Query(
+        default=None, description="What's sitting in this team right now"
+    ),
     breached: Optional[bool] = Query(default=None, description="Only tickets past their SLA"),
     watching: bool = Query(default=False, description="Only tickets you watch"),
     include_subtasks: bool = Query(default=False, description="Sub-tasks are hidden by default"),
@@ -64,7 +68,7 @@ def list_tickets(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return crud.get_tickets(
+    tickets = crud.get_tickets(
         db,
         status=status,
         assignee_id=assignee_id,
@@ -75,11 +79,13 @@ def list_tickets(
         label_id=label_id,
         component_id=component_id,
         client_name=client_name,
+        current_team_id=current_team_id,
         breached=breached,
         watcher_id=current_user.id if watching else None,
         include_subtasks=include_subtasks,
         search=search,
     )
+    return crud.attach_workflow(db, tickets, current_user)
 
 
 @router.get("/epics", response_model=list[TicketOut])
@@ -107,7 +113,21 @@ def create_ticket(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return crud.create_ticket(db, payload, created_by_id=current_user.id)
+    ticket = crud.create_ticket(db, payload, created_by_id=current_user.id)
+
+    # Routed into the cross-team workflow at the moment it's raised.
+    if payload.route_to_user_id:
+        target = crud.get_user(db, payload.route_to_user_id)
+        if not target:
+            raise HTTPException(status_code=400, detail="That person doesn't exist")
+        if not target.team_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{target.full_name} isn't on a team yet — assign one in Settings",
+            )
+        ticket = crud.raise_into_workflow(db, ticket, current_user, target, payload.route_note)
+
+    return crud.attach_workflow(db, [ticket], current_user)[0]
 
 
 @router.get("/{ticket_id}", response_model=TicketOut)
@@ -119,7 +139,7 @@ def get_ticket(
     ticket = crud.get_ticket(db, ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return ticket
+    return crud.attach_workflow(db, [ticket], current_user)[0]
 
 
 @router.patch("/{ticket_id}", response_model=TicketOut)
@@ -132,7 +152,8 @@ def update_ticket(
     ticket = crud.get_ticket(db, ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return crud.update_ticket(db, ticket, payload, actor_id=current_user.id)
+    updated = crud.update_ticket(db, ticket, payload, actor_id=current_user.id)
+    return crud.attach_workflow(db, [updated], current_user)[0]
 
 
 @router.patch("/{ticket_id}/move", response_model=TicketOut)
@@ -296,6 +317,57 @@ def delete_attachment(
         stored.unlink(missing_ok=True)
 
     crud.delete_attachment(db, attachment)
+
+
+@router.post("/{ticket_id}/handoff", response_model=TicketOut)
+def hand_off_ticket(
+    ticket_id: uuid.UUID,
+    payload: HandoffCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Move a ticket to the next team/person in the workflow.
+
+    Permission is decided by the state machine, NOT by the UI. Hiding a button
+    is a courtesy; this is the enforcement.
+    """
+    ticket = crud.get_ticket(db, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    crud.attach_workflow(db, [ticket], current_user)
+    spec = workflow.find_spec(ticket, current_user, payload.action)
+    if not spec:
+        # Deliberately explicit: "you can't do that" is more useful than a
+        # generic 403, and it costs nothing — the ticket's holder isn't secret.
+        holder = ticket.current_team.name if ticket.current_team else "nobody"
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"You can't do that. This ticket is with {holder}"
+                + (f" ({ticket.assignee.full_name})" if ticket.assignee else "")
+                + "."
+            ),
+        )
+
+    try:
+        moved = crud.perform_handoff(db, ticket, current_user, spec, payload)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+    return crud.attach_workflow(db, [moved], current_user)[0]
+
+
+@router.get("/{ticket_id}/handoffs", response_model=list[HandoffOut])
+def get_ticket_handoffs(
+    ticket_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The full chain of custody: every team, every person, when they received
+    it, when they passed it on, how long they held it, and what they said."""
+    if not crud.get_ticket(db, ticket_id):
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return crud.build_timeline(crud.get_handoffs(db, ticket_id))
 
 
 @router.get("/{ticket_id}/activity", response_model=list[ActivityLogOut])
