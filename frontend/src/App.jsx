@@ -12,6 +12,7 @@ import Profile from "./pages/Profile";
 import Components from "./pages/Components";
 import Backlog from "./pages/Backlog";
 import Workflow from "./pages/Workflow";
+import People from "./pages/People";
 import Placeholder from "./pages/Placeholder";
 
 function ProtectedRoute({ children }) {
@@ -37,6 +38,7 @@ function AppRoutes() {
         <Route path="/backlog" element={<Backlog />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/workflow" element={<Workflow />} />
+        <Route path="/people" element={<People />} />
         <Route path="/sprints" element={<Sprints />} />
         <Route path="/components" element={<Components />} />
         <Route

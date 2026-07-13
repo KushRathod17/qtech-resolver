@@ -2706,3 +2706,117 @@ body { background: var(--color-bg); color: var(--color-text); }
   color: var(--priority-high);
 }
 
+
+/* ==========================================================================
+   People
+   ========================================================================== */
+
+/* ROOT CAUSE of the invisible team dropdown: .settings-row is a non-wrapping
+   flex row, and a <select> shrinks by default. In a 360px settings column with
+   two dropdowns in the row, flexbox crushed them to a sliver â€” rendered, but
+   effectively invisible. A control must never be allowed to shrink to nothing. */
+.filter-select,
+.people-select {
+  flex-shrink: 0;
+  min-width: 120px;
+}
+
+.people-page {
+  padding: 24px 28px 40px;
+}
+
+.people-panel {
+  padding: 6px 18px 12px;
+}
+
+.people-table {
+  min-width: 760px;
+}
+.people-table td {
+  padding: 12px 10px;
+  vertical-align: middle;
+}
+.people-table th {
+  padding: 10px;
+}
+
+.people-select {
+  background: var(--color-panel-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--color-text);
+  font-size: 13px;
+  outline: none;
+  width: 100%;
+  max-width: 200px;
+}
+.people-select:hover:not(:disabled) { border-color: var(--color-text-dim); }
+.people-select:focus { border-color: var(--color-accent); }
+.people-select:disabled { opacity: 0.5; }
+
+/* Unassigned reads as a warning, not as an empty cell â€” these people silently
+   cannot act on the workflow. */
+.people-select.needs-team {
+  border-color: var(--priority-high);
+  color: var(--priority-high);
+  background: rgba(245, 166, 35, 0.08);
+}
+
+.row-unassigned td:first-child {
+  box-shadow: inset 3px 0 0 var(--priority-high);
+}
+
+.unassigned-pill {
+  border-color: var(--priority-high) !important;
+  color: var(--priority-high) !important;
+  background: rgba(245, 166, 35, 0.1) !important;
+}
+
+.unassigned-warning {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(245, 166, 35, 0.08);
+  border: 1px solid var(--priority-high);
+  color: var(--priority-high);
+  font-size: 13px;
+}
+
+/* Save feedback: the change is already committed, this just confirms it. */
+.saved-col {
+  width: 80px;
+  white-space: nowrap;
+}
+
+.saved-flash {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--priority-low);
+  animation: saved-in 0.15s ease-out;
+}
+
+.saving-flash {
+  font-size: 12px;
+  color: var(--color-text-faint);
+}
+
+@keyframes saved-in {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.people-table .timeline-person strong { font-size: 13.5px; }
+
+.settings-link-note {
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: var(--color-text-dim);
+}
+.settings-link-note a {
+  color: var(--color-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.settings-link-note a:hover { text-decoration: underline; }
+

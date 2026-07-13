@@ -1,15 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 
-import { labelsApi, usersApi, slaApi, teamsApi, errorMessage } from "../api/resources";
+import { labelsApi, slaApi, teamsApi, errorMessage } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
-import { Avatar, PRIORITY_LABELS, PriorityIcon } from "../board/constants";
-
-const ROLES = ["admin", "manager", "developer"];
-const ROLE_HINTS = {
-  admin: "Full control, including managing people.",
-  manager: "Can manage sprints, labels, and delete tickets.",
-  developer: "Can create and work tickets.",
-};
+import { PRIORITY_LABELS, PriorityIcon } from "../board/constants";
 
 const DEFAULT_COLOR = "#4C9AFF";
 
@@ -279,131 +273,6 @@ function TeamsPanel({ canManage, teams, setTeams }) {
   );
 }
 
-function PeoplePanel({ isAdmin, canManage, currentUser, teams }) {
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [busyId, setBusyId] = useState(null);
-
-  useEffect(() => {
-    usersApi
-      .list()
-      .then(setUsers)
-      .catch((err) => setError(errorMessage(err, "Couldn't load people.")))
-      .finally(() => setLoading(false));
-  }, []);
-
-  async function changeTeam(user, teamId) {
-    setBusyId(user.id);
-    setError("");
-    try {
-      const saved = await usersApi.setTeam(user.id, teamId);
-      setUsers((prev) => prev.map((u) => (u.id === saved.id ? saved : u)));
-    } catch (err) {
-      setError(errorMessage(err, "Couldn't change that team."));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function changeRole(user, role) {
-    setBusyId(user.id);
-    setError("");
-    try {
-      const saved = await usersApi.setRole(user.id, role);
-      setUsers((prev) => prev.map((u) => (u.id === saved.id ? saved : u)));
-    } catch (err) {
-      // The server refuses to demote the last admin — surface that verbatim.
-      setError(errorMessage(err, "Couldn't change that role."));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  return (
-    <section className="settings-panel">
-      <div className="settings-panel-head">
-        <h3>People</h3>
-        <p className="chart-sub">
-          {isAdmin
-            ? "Roles are assigned here — signing up never grants one."
-            : "Only admins can change roles."}
-        </p>
-      </div>
-
-      {error && <div className="banner-error" role="alert">{error}</div>}
-
-      {loading ? (
-        <p className="empty-state">Loading people…</p>
-      ) : (
-        <ul className="settings-list">
-          {users.map((u) => (
-            <li key={u.id} className="settings-row">
-              <Avatar user={u} size={30} />
-              <div className="settings-row-name">
-                <strong>{u.full_name}</strong>
-                <span className="settings-row-sub">{u.email}</span>
-              </div>
-
-              {/* Team is separate from role: a person with role=developer can
-                  sit on Testing, and an admin can sit on Contact/Support. */}
-              {canManage ? (
-                <select
-                  className={`filter-select ${!u.team_id ? "needs-team" : ""}`}
-                  value={u.team_id || ""}
-                  disabled={busyId === u.id}
-                  onChange={(e) => changeTeam(u, e.target.value)}
-                  aria-label={`Team for ${u.full_name}`}
-                >
-                  <option value="">No team</option>
-                  {teams.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-              ) : (
-                <span className="state-pill">
-                  {teams.find((t) => t.id === u.team_id)?.name || "No team"}
-                </span>
-              )}
-
-              {isAdmin ? (
-                <select
-                  className="filter-select"
-                  value={u.role}
-                  disabled={busyId === u.id}
-                  onChange={(e) => changeRole(u, e.target.value)}
-                  aria-label={`Role for ${u.full_name}`}
-                >
-                  {ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="state-pill">{u.role}</span>
-              )}
-
-              {u.id === currentUser?.id && <span className="you-tag">you</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {isAdmin && (
-        <dl className="role-key">
-          {ROLES.map((r) => (
-            <div key={r}>
-              <dt>{r}</dt>
-              <dd>{ROLE_HINTS[r]}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-    </section>
-  );
-}
-
 function SlaPanel({ canManage }) {
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -487,8 +356,7 @@ function SlaPanel({ canManage }) {
 
 export default function Settings() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
-  const canManage = isAdmin || user?.role === "manager";
+  const canManage = user?.role === "admin" || user?.role === "manager";
 
   const [teams, setTeams] = useState([]);
   const [teamsError, setTeamsError] = useState("");
@@ -506,11 +374,16 @@ export default function Settings() {
         <h2>Settings</h2>
       </div>
 
+      <p className="settings-link-note">
+        Assigning people to teams and changing roles now lives on{" "}
+        <Link to="/people">People</Link> — it's something you do constantly, not one-time config.
+        Teams themselves are created here.
+      </p>
+
       {teamsError && <div className="banner-error" role="alert">{teamsError}</div>}
 
       <div className="settings-grid">
         <TeamsPanel canManage={canManage} teams={teams} setTeams={setTeams} />
-        <PeoplePanel isAdmin={isAdmin} canManage={canManage} currentUser={user} teams={teams} />
         <LabelsPanel canManage={canManage} />
         <SlaPanel canManage={canManage} />
       </div>
