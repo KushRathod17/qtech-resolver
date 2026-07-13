@@ -1,4 +1,7 @@
-:root {
+/* Dark is the default and the fallback: an unknown data-theme value lands here
+   rather than on an unstyled page. */
+:root,
+:root[data-theme="dark"] {
   --color-bg: #0F141F;
   --color-panel: #161D2B;
   --color-panel-alt: #1C2434;
@@ -12,12 +15,45 @@
   --priority-medium: #4C9AFF;
   --priority-high: #F5A623;
   --priority-urgent: #E5484D;
+  --shadow-card: 0 12px 28px rgba(0, 0, 0, 0.45);
+  --color-scrim: rgba(6, 9, 15, 0.7);
+  --color-shimmer: #222c3d;
+}
+
+/* Light is a SELECTED palette, not an inversion of the dark one. The accent and
+   status hues are darkened so they still clear contrast against a white panel —
+   the dark-mode blue on white is unreadable at small sizes. */
+:root[data-theme="light"] {
+  --color-bg: #F4F6FA;
+  --color-panel: #FFFFFF;
+  --color-panel-alt: #F0F3F8;
+  --color-border: #DDE3ED;
+  --color-text: #16202F;
+  --color-text-dim: #5A6779;
+  --color-text-faint: #8996A8;
+  --color-accent: #2563EB;
+  --color-accent-hover: #1D4ED8;
+  --priority-low: #2E9464;
+  --priority-medium: #2563EB;
+  --priority-high: #B76E00;
+  --priority-urgent: #C62A2F;
+  --shadow-card: 0 12px 28px rgba(22, 32, 47, 0.12);
+  --color-scrim: rgba(22, 32, 47, 0.42);
+  --color-shimmer: #E4E9F1;
+}
+
+:root {
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
   --font-display: 'Space Grotesk', sans-serif;
   --font-mono: 'IBM Plex Mono', monospace;
+  color-scheme: dark;
 }
+:root[data-theme="light"] { color-scheme: light; }
+
+/* Keep the page background in step with the theme, not just the app shell. */
+body { background: var(--color-bg); color: var(--color-text); }
 
 .app-shell {
   min-height: 100vh;
@@ -366,7 +402,7 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(6, 9, 15, 0.7);
+  background: var(--color-scrim);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -666,7 +702,7 @@
 .ticket-card.dragging {
   cursor: grabbing;
   border-color: var(--color-accent);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-card);
   transform: rotate(1.5deg);
 }
 
@@ -800,7 +836,7 @@
   background: linear-gradient(
     90deg,
     var(--color-panel-alt) 25%,
-    #222c3d 50%,
+    var(--color-shimmer) 50%,
     var(--color-panel-alt) 75%
   );
   background-size: 200% 100%;
@@ -1009,7 +1045,7 @@
   padding: 8px 10px;
   font-size: 11.5px;
   color: var(--color-text-dim);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-card);
 }
 .chart-tooltip strong {
   color: var(--color-text);
@@ -1373,7 +1409,7 @@
   background: var(--color-panel);
   border: 1px solid var(--color-accent);
   border-radius: var(--radius-lg);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-card);
   animation: bulk-rise 0.15s ease-out;
 }
 
@@ -1434,7 +1470,7 @@
 .palette-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(6, 9, 15, 0.66);
+  background: var(--color-scrim);
   backdrop-filter: blur(2px);
   z-index: 1200;
   display: flex;
@@ -1449,7 +1485,7 @@
   background: var(--color-panel);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
   animation: palette-in 0.12s ease-out;
 }
@@ -2106,7 +2142,7 @@
 .dragging-overlay {
   background: var(--color-panel-alt);
   border: 1px solid var(--color-accent);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-card);
   cursor: grabbing;
   padding: 10px 12px;
 }
@@ -2291,4 +2327,162 @@
 }
 .pinned-chip:hover .pinned-x { opacity: 0.6; }
 .pinned-x:hover { opacity: 1 !important; }
+
+
+/* ==========================================================================
+   Theme toggle
+   ========================================================================== */
+.theme-toggle {
+  font-size: 15px;
+  line-height: 1;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+}
+.theme-toggle:hover { background: var(--color-panel-alt); }
+
+/* ==========================================================================
+   Keyboard shortcuts
+   ========================================================================== */
+.shortcuts-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 800;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-text-faint);
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.shortcuts-fab:hover {
+  opacity: 1;
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.shortcuts-overlay {
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.shortcuts-card {
+  width: 480px;
+  max-width: 100%;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.shortcuts-card .panel-header h3 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  margin: 0;
+}
+
+.shortcuts-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 22px;
+}
+.shortcuts-list li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.shortcuts-list li:last-child { border-bottom: none; }
+
+.shortcut-keys {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  min-width: 88px;
+}
+.shortcut-keys kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  background: var(--color-panel-alt);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 2px 6px;
+  color: var(--color-text-dim);
+}
+
+.shortcut-label {
+  font-size: 13px;
+  color: var(--color-text-dim);
+}
+
+.shortcuts-foot {
+  margin: 0;
+  padding: 12px 22px 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* ==========================================================================
+   @mentions
+   ========================================================================== */
+.composer {
+  position: relative;
+  margin-top: 10px;
+}
+
+.mention-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin: 0 0 6px;
+  padding: 5px;
+  list-style: none;
+  background: var(--color-panel-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-card);
+}
+
+.mention-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: 13px;
+  text-align: left;
+}
+.mention-option.active {
+  background: rgba(62, 123, 250, 0.14);
+  color: var(--color-text);
+}
+
+.mention-role {
+  margin-left: auto;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-faint);
+}
+
+.mention-chip {
+  color: var(--color-accent);
+  background: rgba(62, 123, 250, 0.12);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-weight: 600;
+}
+
+.composer .field-hint { margin-top: 6px; }
 

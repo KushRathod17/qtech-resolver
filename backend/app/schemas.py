@@ -21,6 +21,7 @@ class UserOut(BaseModel):
     full_name: str
     role: UserRole
     avatar_url: Optional[str] = None
+    theme: str = "dark"
 
 
 class UserRoleUpdate(BaseModel):
@@ -379,6 +380,10 @@ class TicketOut(BaseModel):
 # ---------- Comments ----------
 class CommentCreate(BaseModel):
     body: str = Field(min_length=1, max_length=2000)
+    # Who was @mentioned. Sent as ids rather than parsed out of the text: two
+    # people can share a display name, and "@Sara" is ambiguous in a way an id
+    # never is. Mentioned users are auto-added as watchers.
+    mention_user_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class CommentOut(BaseModel):

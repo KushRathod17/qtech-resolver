@@ -6,6 +6,7 @@ import LabelPicker from "./LabelPicker";
 import SlaBadge from "./SlaBadge";
 import SubtaskList from "./SubtaskList";
 import AttachmentList from "./AttachmentList";
+import CommentComposer, { CommentBody } from "./CommentComposer";
 import {
   COLUMNS,
   PRIORITIES,
@@ -71,7 +72,6 @@ export default function TicketModal({
 
   const [comments, setComments] = useState([]);
   const [activity, setActivity] = useState([]);
-  const [newComment, setNewComment] = useState("");
   const [threadLoading, setThreadLoading] = useState(!isNew);
   const [posting, setPosting] = useState(false);
 
@@ -203,13 +203,17 @@ export default function TicketModal({
     }
   }
 
-  async function handleComment() {
-    if (!newComment.trim()) return;
+  async function handleComment(text, mentionUserIds) {
     setPosting(true);
+    setError("");
     try {
-      const created = await commentsApi.create(ticket.id, newComment.trim());
+      const created = await commentsApi.create(ticket.id, text, mentionUserIds);
       setComments((prev) => [...prev, created]);
-      setNewComment("");
+      // A mention adds the person as a watcher server-side; refetch so the
+      // watch count in the header reflects that immediately.
+      if (mentionUserIds.length) {
+        onSaved(await ticketsApi.get(ticket.id));
+      }
     } catch (err) {
       setError(errorMessage(err, "Couldn't post that comment."));
     } finally {
@@ -428,28 +432,12 @@ export default function TicketModal({
                           {new Date(c.created_at).toLocaleString()}
                         </span>
                       </div>
-                      <p className="comment-body">{c.body}</p>
+                      <CommentBody text={c.body} users={users} />
                     </div>
                   ))
                 )}
 
-                <div className="comment-input-row">
-                  <input
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleComment()}
-                    placeholder="Add a comment…"
-                    aria-label="Add a comment"
-                  />
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={handleComment}
-                    disabled={posting || !newComment.trim()}
-                  >
-                    {posting ? "Posting…" : "Post"}
-                  </button>
-                </div>
+                <CommentComposer users={users} onSubmit={handleComment} posting={posting} />
               </section>
 
               <section className="modal-section">

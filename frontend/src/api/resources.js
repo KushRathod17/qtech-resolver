@@ -48,8 +48,10 @@ export const filtersApi = {
 
 export const commentsApi = {
   list: (ticketId) => apiClient.get(`/tickets/${ticketId}/comments/`).then((r) => r.data),
-  create: (ticketId, body) =>
-    apiClient.post(`/tickets/${ticketId}/comments/`, { body }).then((r) => r.data),
+  create: (ticketId, body, mentionUserIds = []) =>
+    apiClient
+      .post(`/tickets/${ticketId}/comments/`, { body, mention_user_ids: mentionUserIds })
+      .then((r) => r.data),
 };
 
 export const componentsApi = {

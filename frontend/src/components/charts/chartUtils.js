@@ -9,12 +9,19 @@ export const SERIES = {
   secondary: "#199e70", // slot 2 — "Committed"
 };
 
-/** Chrome stays in ink tokens, never a series colour. */
+/**
+ * Chrome stays in ink tokens, never a series colour — and those tokens are CSS
+ * variables, not hex, so the grid and axis follow the light/dark theme instead
+ * of staying dark-navy on a white panel. SVG paint attributes accept var().
+ *
+ * The series colours above stay literal: they were validated as a PAIR against
+ * both surfaces and must not drift with the theme.
+ */
 export const INK = {
-  grid: "#2A3344",
-  axis: "#576073",
-  muted: "#8792A6",
-  surface: "#161D2B",
+  grid: "var(--color-border)",
+  axis: "var(--color-text-faint)",
+  muted: "var(--color-text-dim)",
+  surface: "var(--color-panel)", // the 2px ring that separates overlapping marks
 };
 
 /**

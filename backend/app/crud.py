@@ -957,6 +957,21 @@ def create_comment(
     db_comment = models.Comment(ticket_id=ticket_id, author_id=author_id, body=comment_in.body)
     db.add(db_comment)
     log_activity(db, ticket_id, author_id, "commented", comment_in.body[:80])
+
+    if comment_in.mention_user_ids:
+        ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+        mentioned = (
+            db.query(models.User)
+            .filter(models.User.id.in_(comment_in.mention_user_ids))
+            .all()
+        )
+        for user in mentioned:
+            # A mention that doesn't make you follow the ticket is just
+            # decoration — you'd never see the reply.
+            if ticket and user not in ticket.watchers:
+                ticket.watchers.append(user)
+            log_activity(db, ticket_id, author_id, "mentioned", user.full_name)
+
     db.commit()
     db.refresh(db_comment)
     return db_comment
