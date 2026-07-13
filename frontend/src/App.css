@@ -1663,3 +1663,121 @@
   font-weight: 600;
 }
 
+
+/* ==========================================================================
+   Profile
+   ========================================================================== */
+.profile-page {
+  padding: 24px 28px 40px;
+}
+
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.profile-identity h2 {
+  font-family: var(--font-display);
+  font-size: 22px;
+  margin: 0 0 2px;
+}
+
+.profile-email {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--color-text-dim);
+}
+
+.state-pill.role-admin {
+  border-color: #8B5CF6;
+  color: #8B5CF6;
+  background: rgba(139, 92, 246, 0.1);
+}
+.state-pill.role-manager {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: rgba(62, 123, 250, 0.1);
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 980px) {
+  .profile-grid { grid-template-columns: 1fr; }
+}
+
+.profile-ticket {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--color-text);
+}
+.profile-ticket:hover .profile-ticket-title { color: var(--color-accent); }
+
+.profile-ticket-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+}
+
+/* The avatar rendered from an uploaded image rather than initials. */
+.avatar-img {
+  object-fit: cover;
+  display: block;
+}
+
+.avatar-edit {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.avatar-edit-actions {
+  flex: 1;
+  min-width: 0;
+}
+.avatar-edit-actions input[type="file"] {
+  font-size: 12px;
+  color: var(--color-text-dim);
+  max-width: 100%;
+}
+.avatar-edit-actions input[type="file"]::file-selector-button {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  padding: 6px 10px;
+  margin-right: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.notice-text {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: var(--priority-low);
+}
+
+.user-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+}
+.user-link:hover { background: var(--color-panel-alt); }
+

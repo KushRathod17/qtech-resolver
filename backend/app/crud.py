@@ -51,6 +51,45 @@ def set_user_role(db: Session, user: models.User, role: models.UserRole) -> mode
     return user
 
 
+def update_user(db: Session, user: models.User, changes: schemas.UserUpdate) -> models.User:
+    for field, value in changes.model_dump(exclude_unset=True).items():
+        setattr(user, field, value)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def set_password(db: Session, user: models.User, new_password: str) -> models.User:
+    user.hashed_password = hash_password(new_password)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+OPEN_STATUSES = (models.TicketStatus.BACKLOG, models.TicketStatus.TODO)
+WIP_STATUSES = (models.TicketStatus.IN_PROGRESS, models.TicketStatus.CODE_REVIEW)
+
+
+def user_stats(db: Session, user_id: uuid.UUID) -> dict:
+    tickets = db.query(models.Ticket).filter(models.Ticket.assignee_id == user_id).all()
+
+    def count(statuses):
+        return sum(1 for t in tickets if t.status in statuses)
+
+    return {
+        "open": count(OPEN_STATUSES),
+        "in_progress": count(WIP_STATUSES),
+        "done": count((models.TicketStatus.DONE,)),
+        "total": len(tickets),
+        # The honest measure of load: points still on their plate, not ticket count.
+        "story_points_open": sum(
+            t.story_points or 0
+            for t in tickets
+            if t.status in OPEN_STATUSES + WIP_STATUSES
+        ),
+    }
+
+
 # ---------- Activity log ----------
 def log_activity(db: Session, ticket_id: uuid.UUID, actor_id: uuid.UUID, action: str, details: str = None):
     """Stages a log entry. The caller commits, so the log and the change it

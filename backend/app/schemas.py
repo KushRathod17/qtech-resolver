@@ -20,10 +20,43 @@ class UserOut(BaseModel):
     email: EmailStr
     full_name: str
     role: UserRole
+    avatar_url: Optional[str] = None
 
 
 class UserRoleUpdate(BaseModel):
     role: UserRole
+
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    theme: Optional[str] = Field(default=None, pattern="^(dark|light)$")
+    # Explicit null clears the avatar back to generated initials.
+    avatar_url: Optional[str] = None
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=72)
+    new_password: str = Field(min_length=8, max_length=72)
+
+
+class UserStats(BaseModel):
+    """Ticket load for one person — the "who is drowning" view."""
+    open: int          # backlog + todo
+    in_progress: int   # in_progress + code_review
+    done: int
+    total: int
+    story_points_open: int
+
+
+class UserProfileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    email: EmailStr
+    full_name: str
+    role: UserRole
+    avatar_url: Optional[str]
+    theme: str
+    created_at: datetime
 
 
 class Token(BaseModel):

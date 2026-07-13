@@ -8,6 +8,7 @@ import Board from "./pages/Board";
 import Reports from "./pages/Reports";
 import Sprints from "./pages/Sprints";
 import Settings from "./pages/Settings";
+import Profile from "./pages/Profile";
 import Placeholder from "./pages/Placeholder";
 
 function ProtectedRoute({ children }) {
@@ -67,6 +68,7 @@ function AppRoutes() {
           }
         />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/profile/:id" element={<Profile />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/board" replace />} />

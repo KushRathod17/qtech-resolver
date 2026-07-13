@@ -48,6 +48,25 @@ export const sprintsApi = {
 export const usersApi = {
   list: () => apiClient.get("/users/").then((r) => r.data),
   setRole: (id, role) => apiClient.patch(`/users/${id}/role`, { role }).then((r) => r.data),
+
+  me: () => apiClient.get("/users/me").then((r) => r.data),
+  profile: (id) => apiClient.get(`/users/${id}`).then((r) => r.data),
+  stats: (id) => apiClient.get(`/users/${id}/stats`).then((r) => r.data),
+  tickets: (id) => apiClient.get(`/users/${id}/tickets`).then((r) => r.data),
+
+  updateMe: (payload) => apiClient.patch("/users/me", payload).then((r) => r.data),
+  changePassword: (currentPassword, newPassword) =>
+    apiClient.post("/users/me/password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  uploadAvatar: (file) => {
+    const body = new FormData();
+    body.append("file", file);
+    // Let the browser set the multipart boundary — hardcoding the Content-Type
+    // here would omit it and the server would reject the body.
+    return apiClient.post("/users/me/avatar", body).then((r) => r.data);
+  },
 };
 
 /** Axios errors are noisy; pull out the one line worth showing a user. */

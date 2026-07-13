@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .routers import auth, tickets, comments, users, labels, sprints
@@ -17,6 +20,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+UPLOADS = Path(__file__).resolve().parent.parent / "uploads"
+UPLOADS.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOADS), name="uploads")
 
 app.include_router(auth.router)
 app.include_router(tickets.router)

@@ -81,6 +81,12 @@ export function avatarColor(id = "") {
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
+// Avatar images are served by the API, not the Vite dev server.
+export const API_ORIGIN = "http://127.0.0.1:8000";
+
+export const avatarSrc = (user) =>
+  user?.avatar_url ? `${API_ORIGIN}${user.avatar_url}` : null;
+
 export function Avatar({ user, size = 24, title }) {
   if (!user) {
     return (
@@ -89,6 +95,20 @@ export function Avatar({ user, size = 24, title }) {
       </div>
     );
   }
+
+  const src = avatarSrc(user);
+  if (src) {
+    return (
+      <img
+        className="avatar avatar-img"
+        src={src}
+        alt=""
+        style={{ width: size, height: size }}
+        title={title || user.full_name}
+      />
+    );
+  }
+
   return (
     <div
       className="avatar"

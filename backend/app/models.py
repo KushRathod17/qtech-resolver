@@ -68,6 +68,9 @@ class User(Base):
     full_name = Column(String, nullable=False)
     hashed_password = Column(String, nullable=False)
     role = Column(SAEnum(UserRole), nullable=False, default=UserRole.DEVELOPER)
+    # Null means "fall back to generated initials", which is the common case.
+    avatar_url = Column(String, nullable=True)
+    theme = Column(String, nullable=False, server_default="dark")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     tickets_assigned = relationship("Ticket", back_populates="assignee", foreign_keys="Ticket.assignee_id")

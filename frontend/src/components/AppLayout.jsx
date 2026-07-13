@@ -1,4 +1,4 @@
-import { Outlet } from "react-router-dom";
+import { Outlet, Link } from "react-router-dom";
 
 import Sidebar from "./Sidebar";
 import CommandPalette from "./CommandPalette";
@@ -25,11 +25,13 @@ export default function AppLayout() {
             <span className="kbd-hint" title="Open the command palette">
               <kbd>Ctrl</kbd><kbd>K</kbd>
             </span>
-            <Avatar user={user} size={28} />
-            <div className="user-meta">
-              <span className="user-name">{user?.full_name}</span>
-              <span className="user-role">{user?.role}</span>
-            </div>
+            <Link to="/profile/me" className="user-link" title="Your profile">
+              <Avatar user={user} size={28} />
+              <div className="user-meta">
+                <span className="user-name">{user?.full_name}</span>
+                <span className="user-role">{user?.role}</span>
+              </div>
+            </Link>
             <button type="button" className="btn-secondary" onClick={logout}>
               Log out
             </button>

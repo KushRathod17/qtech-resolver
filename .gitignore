@@ -16,3 +16,6 @@ frontend/dist/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Uploaded avatars/attachments — user data, not source
+backend/uploads/

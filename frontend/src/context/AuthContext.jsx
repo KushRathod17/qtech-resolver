@@ -49,6 +49,12 @@ export function AuthProvider({ children }) {
     await login(email, password);
   };
 
+  // Called after a profile edit so the top-bar avatar/name update without a reload.
+  const refreshUser = async () => {
+    const { data } = await apiClient.get("/auth/me");
+    setUser(data);
+  };
+
   const logout = () => {
     localStorage.removeItem("access_token");
     setToken(null);
@@ -57,7 +63,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ token, user, isAuthenticated: !!token, login, register, logout, loading }}
+      value={{ token, user, isAuthenticated: !!token, login, register, logout, refreshUser, loading }}
     >
       {children}
     </AuthContext.Provider>
