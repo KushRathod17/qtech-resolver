@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { ticketsApi, commentsApi, errorMessage } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
 import LabelPicker from "./LabelPicker";
+import SlaBadge from "./SlaBadge";
 import {
   COLUMNS,
   PRIORITIES,
@@ -22,6 +23,8 @@ const BLANK = {
   ticket_type: "task",
   story_points: "",
   assignee_id: "",
+  component_id: "",
+  client_name: "",
   due_date: "",
   label_ids: [],
 };
@@ -38,6 +41,8 @@ function ticketToForm(t) {
     ticket_type: t.ticket_type,
     story_points: t.story_points ?? "",
     assignee_id: t.assignee?.id || "",
+    component_id: t.component?.id || "",
+    client_name: t.client_name || "",
     due_date: toDateInput(t.due_date),
     label_ids: t.labels.map((l) => l.id),
   };
@@ -47,6 +52,8 @@ export default function TicketModal({
   ticket,
   users,
   labels,
+  components = [],
+  clients = [],
   onClose,
   onSaved,
   onDeleted,
@@ -105,6 +112,8 @@ export default function TicketModal({
       ticket_type: form.ticket_type,
       story_points: form.story_points === "" ? null : Number(form.story_points),
       assignee_id: form.assignee_id || null,
+      component_id: form.component_id || null,
+      client_name: form.client_name.trim() || null,
       due_date: form.due_date ? new Date(form.due_date).toISOString() : null,
       label_ids: form.label_ids,
     };
@@ -250,6 +259,44 @@ export default function TicketModal({
               <input id="t-due" type="date" value={form.due_date} onChange={set("due_date")} />
             </div>
           </div>
+
+          <div className="field-row">
+            <div className="field">
+              <label htmlFor="t-component">Component</label>
+              <select id="t-component" value={form.component_id} onChange={set("component_id")}>
+                <option value="">None</option>
+                {components.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="t-client">Client</label>
+              {/* Free text with a datalist: the client who raised this is often
+                  a new one, so a fixed dropdown would block the ticket. */}
+              <input
+                id="t-client"
+                list="known-clients"
+                value={form.client_name}
+                onChange={set("client_name")}
+                placeholder="e.g. Kesari Tours"
+              />
+              <datalist id="known-clients">
+                {clients.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+
+          {!isNew && ticket.sla && (
+            <div className="sla-strip">
+              <SlaBadge sla={ticket.sla} />
+              <span className="sla-note">
+                Target {ticket.sla.threshold_hours}h for {PRIORITY_LABELS[ticket.priority]} priority
+              </span>
+            </div>
+          )}
 
           <div className="field">
             <label>Labels</label>

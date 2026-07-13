@@ -89,6 +89,37 @@ class Label(Base):
     tickets = relationship("Ticket", secondary=ticket_labels, back_populates="labels")
 
 
+class Component(Base):
+    """A part of the system a ticket belongs to — OTRAMS-Booking, RateNet-API,
+    rePUSHTI. This is what stops a support queue spanning several products from
+    blurring into one undifferentiated list."""
+    __tablename__ = "components"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    color = Column(String, nullable=False, default="#3E7BFA")
+    # Who picks this up by default when nobody is assigned.
+    lead_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    lead = relationship("User", foreign_keys=[lead_id])
+    tickets = relationship("Ticket", back_populates="component")
+
+
+class SLAPolicy(Base):
+    """How long a ticket of a given priority may sit before it is breached.
+
+    Configurable rather than hardcoded, because "critical" means four hours to
+    one team and one hour to another.
+    """
+    __tablename__ = "sla_policies"
+
+    priority = Column(SAEnum(TicketPriority), primary_key=True)
+    # Null means this priority has no SLA — most teams only track the top ones.
+    threshold_hours = Column(Integer, nullable=True)
+
+
 class Sprint(Base):
     __tablename__ = "sprints"
 
@@ -126,6 +157,16 @@ class Ticket(Base):
     story_points = Column(Integer, nullable=True)
     due_date = Column(DateTime, nullable=True)
 
+    # The external travel agency / company that raised this, distinct from the
+    # internal reporter. A support ticket has both: a colleague who filed it and
+    # a client who is waiting on it.
+    client_name = Column(String, nullable=True, index=True)
+
+    # When the ticket reached done. Freezes the SLA clock — without this, a
+    # ticket closed inside its window would keep "ageing" and eventually show as
+    # breached forever.
+    resolved_at = Column(DateTime, nullable=True)
+
     # Position within its board column. Floats let us drop a card between two
     # neighbours by averaging their ranks — no need to renumber the column.
     rank = Column(Float, nullable=False, default=0.0)
@@ -133,6 +174,7 @@ class Ticket(Base):
     assignee_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     created_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     sprint_id = Column(UUID(as_uuid=True), ForeignKey("sprints.id", ondelete="SET NULL"), nullable=True)
+    component_id = Column(UUID(as_uuid=True), ForeignKey("components.id", ondelete="SET NULL"), nullable=True)
     # An epic is itself a Ticket (type=epic); children point back at it.
     epic_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="SET NULL"), nullable=True)
 
@@ -142,6 +184,7 @@ class Ticket(Base):
     assignee = relationship("User", back_populates="tickets_assigned", foreign_keys=[assignee_id])
     reporter = relationship("User", back_populates="tickets_reported", foreign_keys=[created_by_id])
     sprint = relationship("Sprint", back_populates="tickets")
+    component = relationship("Component", back_populates="tickets", lazy="joined")
     epic = relationship("Ticket", remote_side=[id], backref="children")
     labels = relationship("Label", secondary=ticket_labels, back_populates="tickets", lazy="selectin")
     comments = relationship("Comment", back_populates="ticket", cascade="all, delete-orphan")

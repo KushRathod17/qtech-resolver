@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import or_, func
@@ -280,6 +280,140 @@ def velocity(db: Session) -> dict:
     return {"sprints": entries, "average_velocity": round(average, 1)}
 
 
+# ---------- Components ----------
+def get_components(db: Session) -> list[models.Component]:
+    return db.query(models.Component).order_by(models.Component.name).all()
+
+
+def get_component(db: Session, component_id: uuid.UUID) -> models.Component | None:
+    return db.query(models.Component).filter(models.Component.id == component_id).first()
+
+
+def get_component_by_name(db: Session, name: str) -> models.Component | None:
+    return db.query(models.Component).filter(
+        func.lower(models.Component.name) == name.lower()
+    ).first()
+
+
+def create_component(db: Session, payload: schemas.ComponentCreate) -> models.Component:
+    component = models.Component(**payload.model_dump())
+    db.add(component)
+    db.commit()
+    db.refresh(component)
+    return component
+
+
+def update_component(
+    db: Session, component: models.Component, payload: schemas.ComponentUpdate
+) -> models.Component:
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(component, field, value)
+    db.commit()
+    db.refresh(component)
+    return component
+
+
+def delete_component(db: Session, component: models.Component) -> None:
+    db.delete(component)
+    db.commit()
+
+
+def component_stats(db: Session) -> list[dict]:
+    """Per-component load, including how many tickets are past their SLA — the
+    'which product is on fire right now' view."""
+    policies = get_sla_policies(db)
+    rows = []
+
+    for component in get_components(db):
+        tickets = db.query(models.Ticket).filter(
+            models.Ticket.component_id == component.id
+        ).all()
+        open_tickets = [t for t in tickets if t.status != models.TicketStatus.DONE]
+        rows.append({
+            "id": component.id,
+            "name": component.name,
+            "description": component.description,
+            "color": component.color,
+            "lead": component.lead,
+            "open_tickets": len(open_tickets),
+            "total_tickets": len(tickets),
+            "breached": sum(1 for t in tickets if _sla_for(t, policies) and _sla_for(t, policies)["breached"]),
+        })
+    return rows
+
+
+# ---------- SLA ----------
+def get_sla_policies(db: Session) -> dict[models.TicketPriority, int | None]:
+    return {
+        row.priority: row.threshold_hours
+        for row in db.query(models.SLAPolicy).all()
+    }
+
+
+def list_sla_policies(db: Session) -> list[models.SLAPolicy]:
+    return db.query(models.SLAPolicy).all()
+
+
+def set_sla_policy(
+    db: Session, priority: models.TicketPriority, threshold_hours: int | None
+) -> models.SLAPolicy:
+    policy = db.query(models.SLAPolicy).filter(models.SLAPolicy.priority == priority).first()
+    if policy:
+        policy.threshold_hours = threshold_hours
+    else:
+        policy = models.SLAPolicy(priority=priority, threshold_hours=threshold_hours)
+        db.add(policy)
+    db.commit()
+    db.refresh(policy)
+    return policy
+
+
+def _sla_for(ticket: models.Ticket, policies: dict) -> dict | None:
+    """The live clock for one ticket, or None if its priority has no SLA.
+
+    Derived on read, never stored: a stored 'breached' flag is wrong the instant
+    the clock passes the threshold, and would need a cron job to stay true.
+    """
+    threshold = policies.get(ticket.priority)
+    if not threshold:
+        return None
+
+    # A resolved ticket's clock is frozen at the moment it was resolved —
+    # otherwise a ticket closed well inside its window keeps ageing and
+    # eventually reports as breached forever.
+    end = ticket.resolved_at if ticket.status == models.TicketStatus.DONE else None
+    stopped = end is not None
+    if end is None:
+        end = datetime.utcnow()
+
+    elapsed = int((end - (ticket.created_at or end)).total_seconds())
+    limit = threshold * 3600
+    return {
+        "threshold_hours": threshold,
+        "elapsed_seconds": max(elapsed, 0),
+        "remaining_seconds": limit - elapsed,
+        "breached": elapsed > limit,
+        "stopped": stopped,
+    }
+
+
+def attach_sla(db: Session, tickets: list[models.Ticket]) -> list[models.Ticket]:
+    """Hang the computed clock off each ticket so TicketOut can serialise it."""
+    policies = get_sla_policies(db)
+    for ticket in tickets:
+        ticket.sla = _sla_for(ticket, policies)
+    return tickets
+
+
+def _sync_resolved_at(ticket: models.Ticket, new_status: models.TicketStatus) -> None:
+    """Stamp resolved_at on the way into done; clear it on the way back out, so
+    a reopened ticket restarts its clock rather than staying frozen."""
+    if new_status == models.TicketStatus.DONE and ticket.resolved_at is None:
+        ticket.resolved_at = datetime.utcnow()
+    elif new_status != models.TicketStatus.DONE:
+        ticket.resolved_at = None
+
+
 # ---------- Ticket CRUD ----------
 def _ticket_query(db: Session):
     return db.query(models.Ticket).options(
@@ -297,6 +431,9 @@ def get_tickets(
     sprint_id: Optional[uuid.UUID] = None,
     epic_id: Optional[uuid.UUID] = None,
     label_id: Optional[uuid.UUID] = None,
+    component_id: Optional[uuid.UUID] = None,
+    client_name: Optional[str] = None,
+    breached: Optional[bool] = None,
     search: Optional[str] = None,
 ) -> list[models.Ticket]:
     query = _ticket_query(db)
@@ -315,21 +452,49 @@ def get_tickets(
         query = query.filter(models.Ticket.epic_id == epic_id)
     if label_id is not None:
         query = query.filter(models.Ticket.labels.any(models.Label.id == label_id))
+    if component_id is not None:
+        query = query.filter(models.Ticket.component_id == component_id)
+    if client_name:
+        query = query.filter(models.Ticket.client_name.ilike(f"%{client_name}%"))
     if search:
         term = f"%{search}%"
-        # Search the description too — the old version only matched titles.
-        query = query.filter(
-            or_(
-                models.Ticket.title.ilike(term),
-                models.Ticket.description.ilike(term),
-            )
-        )
+        # Title, description, and the ticket key — support engineers paste keys.
+        conditions = [
+            models.Ticket.title.ilike(term),
+            models.Ticket.description.ilike(term),
+            models.Ticket.client_name.ilike(term),
+        ]
+        digits = "".join(ch for ch in search if ch.isdigit())
+        if digits:
+            conditions.append(models.Ticket.ticket_number == int(digits))
+        query = query.filter(or_(*conditions))
 
-    return query.order_by(models.Ticket.rank, models.Ticket.created_at.desc()).all()
+    rows = query.order_by(models.Ticket.rank, models.Ticket.created_at.desc()).all()
+    attach_sla(db, rows)
+
+    # Breach is computed, not a column, so this filter has to happen in Python.
+    if breached is not None:
+        rows = [t for t in rows if bool(t.sla and t.sla["breached"]) is breached]
+
+    return rows
 
 
 def get_ticket(db: Session, ticket_id: uuid.UUID) -> models.Ticket | None:
-    return _ticket_query(db).filter(models.Ticket.id == ticket_id).first()
+    ticket = _ticket_query(db).filter(models.Ticket.id == ticket_id).first()
+    if ticket:
+        attach_sla(db, [ticket])
+    return ticket
+
+
+def get_client_names(db: Session) -> list[str]:
+    rows = (
+        db.query(models.Ticket.client_name)
+        .filter(models.Ticket.client_name.isnot(None))
+        .distinct()
+        .order_by(models.Ticket.client_name)
+        .all()
+    )
+    return [r[0] for r in rows]
 
 
 def _resolve_labels(db: Session, label_ids: list[uuid.UUID]) -> list[models.Label]:
@@ -353,12 +518,58 @@ def create_ticket(db: Session, ticket_in: schemas.TicketCreate, created_by_id: u
     )
     db_ticket.labels = _resolve_labels(db, ticket_in.label_ids)
 
+    _sync_resolved_at(db_ticket, ticket_in.status)
+
     db.add(db_ticket)
     db.flush()  # assigns id + ticket_number so the log can reference them
     log_activity(db, db_ticket.id, created_by_id, "created", f"Created {db_ticket.key}")
     db.commit()
     db.refresh(db_ticket)
+    attach_sla(db, [db_ticket])
     return db_ticket
+
+
+# How each field reads in the activity feed. Anything listed here is tracked;
+# the old version only logged status, assignee, priority and points, so an edit
+# to the title or the client silently vanished from the history.
+TRACKED_FIELDS = {
+    "title": "title",
+    "description": "description",
+    "status": "status",
+    "priority": "priority",
+    "ticket_type": "type",
+    "story_points": "story points",
+    "assignee_id": "assignee",
+    "sprint_id": "sprint",
+    "epic_id": "epic",
+    "component_id": "component",
+    "client_name": "client",
+    "due_date": "due date",
+}
+
+
+def _display(db: Session, field: str, value) -> str:
+    """Render a field value the way a human would say it, not as a raw UUID."""
+    if value is None or value == "":
+        return "none"
+    if field == "assignee_id":
+        user = get_user(db, value)
+        return user.full_name if user else "unknown"
+    if field == "component_id":
+        component = get_component(db, value)
+        return component.name if component else "unknown"
+    if field == "sprint_id":
+        sprint = get_sprint(db, value)
+        return sprint.name if sprint else "unknown"
+    if field == "epic_id":
+        epic = db.query(models.Ticket).filter(models.Ticket.id == value).first()
+        return epic.key if epic else "unknown"
+    if hasattr(value, "value"):  # an enum
+        return value.value
+    if field == "description":
+        text = str(value)
+        return (text[:40] + "…") if len(text) > 40 else text
+    return str(value)
 
 
 def update_ticket(
@@ -367,35 +578,35 @@ def update_ticket(
     update_data = ticket_in.model_dump(exclude_unset=True)
     label_ids = update_data.pop("label_ids", None)
 
+    for field, new_value in update_data.items():
+        old_value = getattr(ticket, field)
+        if new_value == old_value or field not in TRACKED_FIELDS:
+            continue
+
+        log_activity(
+            db, ticket.id, actor_id, f"{TRACKED_FIELDS[field]}_changed",
+            f"{_display(db, field, old_value)} -> {_display(db, field, new_value)}",
+        )
+
     if "status" in update_data and update_data["status"] != ticket.status:
-        log_activity(db, ticket.id, actor_id, "status_changed",
-                     f"{ticket.status.value} -> {update_data['status'].value}")
         # Moving column via the edit form (not drag) — send it to the top.
         ticket.rank = _top_rank(db, update_data["status"])
-
-    if "assignee_id" in update_data and update_data["assignee_id"] != ticket.assignee_id:
-        new_assignee = get_user(db, update_data["assignee_id"]) if update_data["assignee_id"] else None
-        log_activity(db, ticket.id, actor_id, "assigned",
-                     f"Assigned to {new_assignee.full_name}" if new_assignee else "Unassigned")
-
-    if "priority" in update_data and update_data["priority"] != ticket.priority:
-        log_activity(db, ticket.id, actor_id, "priority_changed",
-                     f"{ticket.priority.value} -> {update_data['priority'].value}")
-
-    if "story_points" in update_data and update_data["story_points"] != ticket.story_points:
-        log_activity(db, ticket.id, actor_id, "estimated",
-                     f"{ticket.story_points or '-'} -> {update_data['story_points'] or '-'} points")
+        _sync_resolved_at(ticket, update_data["status"])
 
     for field, value in update_data.items():
         setattr(ticket, field, value)
 
     if label_ids is not None:
+        before = {l.name for l in ticket.labels}
         ticket.labels = _resolve_labels(db, label_ids)
-        log_activity(db, ticket.id, actor_id, "labels_changed",
-                     ", ".join(l.name for l in ticket.labels) or "Labels cleared")
+        after = {l.name for l in ticket.labels}
+        if before != after:
+            log_activity(db, ticket.id, actor_id, "labels_changed",
+                         ", ".join(sorted(after)) or "Labels cleared")
 
     db.commit()
     db.refresh(ticket)
+    attach_sla(db, [ticket])
     return ticket
 
 
@@ -422,6 +633,7 @@ def bulk_update_tickets(
         if bulk.status and bulk.status != ticket.status:
             log_activity(db, ticket.id, actor_id, "status_changed",
                          f"{ticket.status.value} -> {bulk.status.value}")
+            _sync_resolved_at(ticket, bulk.status)
             ticket.status = bulk.status
             ticket.rank = next_rank
             next_rank -= RANK_GAP
@@ -454,6 +666,18 @@ def bulk_update_tickets(
         elif bulk.sprint_id:
             ticket.sprint_id = bulk.sprint_id
 
+        if bulk.clear_component:
+            ticket.component_id = None
+        elif bulk.component_id and bulk.component_id != ticket.component_id:
+            component = get_component(db, bulk.component_id)
+            log_activity(db, ticket.id, actor_id, "component_changed",
+                         component.name if component else "unknown")
+            ticket.component_id = bulk.component_id
+
+        if bulk.client_name is not None and bulk.client_name != ticket.client_name:
+            log_activity(db, ticket.id, actor_id, "client_changed", bulk.client_name or "none")
+            ticket.client_name = bulk.client_name
+
         if add_labels or remove_ids:
             current = {l.id: l for l in ticket.labels}
             for label in add_labels:
@@ -469,6 +693,7 @@ def bulk_update_tickets(
     db.commit()
     for ticket in tickets:
         db.refresh(ticket)
+    attach_sla(db, tickets)
     return tickets
 
 
@@ -497,11 +722,15 @@ def move_ticket(db: Session, ticket: models.Ticket, move: schemas.TicketMove, ac
     if move.status != ticket.status:
         log_activity(db, ticket.id, actor_id, "status_changed",
                      f"{ticket.status.value} -> {move.status.value}")
+        # Dragging a card to Done must stop its SLA clock, exactly as the edit
+        # form does — otherwise the clock depends on how you closed the ticket.
+        _sync_resolved_at(ticket, move.status)
         ticket.status = move.status
 
     ticket.rank = new_rank
     db.commit()
     db.refresh(ticket)
+    attach_sla(db, [ticket])
     return ticket
 
 

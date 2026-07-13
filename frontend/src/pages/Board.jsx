@@ -11,7 +11,14 @@ import {
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 
-import { ticketsApi, labelsApi, usersApi, sprintsApi, errorMessage } from "../api/resources";
+import {
+  ticketsApi,
+  labelsApi,
+  usersApi,
+  sprintsApi,
+  componentsApi,
+  errorMessage,
+} from "../api/resources";
 import { COLUMNS } from "../board/constants";
 import BoardColumn from "../components/BoardColumn";
 import BoardToolbar from "../components/BoardToolbar";
@@ -25,6 +32,8 @@ const EMPTY_FILTERS = {
   label_id: "",
   priority: "",
   ticket_type: "",
+  component_id: "",
+  breached: "", // "" = any, "true" = only tickets past their SLA
 };
 
 export default function Board() {
@@ -32,6 +41,8 @@ export default function Board() {
   const [users, setUsers] = useState([]);
   const [labels, setLabels] = useState([]);
   const [sprints, setSprints] = useState([]);
+  const [components, setComponents] = useState([]);
+  const [clients, setClients] = useState([]);
 
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -77,13 +88,21 @@ export default function Board() {
 
   // Reference data only needs fetching once.
   useEffect(() => {
-    Promise.all([usersApi.list(), labelsApi.list(), sprintsApi.list()])
-      .then(([u, l, s]) => {
+    Promise.all([
+      usersApi.list(),
+      labelsApi.list(),
+      sprintsApi.list(),
+      componentsApi.list(),
+      ticketsApi.clients(),
+    ])
+      .then(([u, l, s, c, cl]) => {
         setUsers(u);
         setLabels(l);
         setSprints(s);
+        setComponents(c);
+        setClients(cl);
       })
-      .catch((err) => setError(errorMessage(err, "Couldn't load users, labels and sprints.")));
+      .catch((err) => setError(errorMessage(err, "Couldn't load board reference data.")));
   }, []);
 
   // Escape is the universal "never mind" — it should drop a selection too.
@@ -107,6 +126,11 @@ export default function Board() {
     if (wanted && tickets.length) {
       const found = tickets.find((t) => t.id === wanted);
       if (found) setOpenTicket(found);
+      setSearchParams({}, { replace: true });
+    }
+    const component = searchParams.get("component");
+    if (component) {
+      setFilters((f) => ({ ...f, component_id: component }));
       setSearchParams({}, { replace: true });
     }
     if (searchParams.get("updated")) {
@@ -275,8 +299,10 @@ export default function Board() {
         setFilters={setFilters}
         users={users}
         labels={labels}
+        components={components}
         onNewTicket={() => setCreating(true)}
         resultCount={tickets.length}
+        breachedCount={tickets.filter((t) => t.sla?.breached && !t.sla.stopped).length}
       />
 
       {error && (
@@ -345,6 +371,8 @@ export default function Board() {
           ticket={openTicket}
           users={users}
           labels={labels}
+          components={components}
+          clients={clients}
           onClose={() => {
             setOpenTicket(null);
             setCreating(false);

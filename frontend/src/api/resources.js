@@ -19,12 +19,28 @@ export const ticketsApi = {
   bulkDelete: (ticketIds) =>
     apiClient.post("/tickets/bulk/delete", { ticket_ids: ticketIds }).then((r) => r.data),
   activity: (id) => apiClient.get(`/tickets/${id}/activity`).then((r) => r.data),
+  clients: () => apiClient.get("/tickets/clients").then((r) => r.data),
 };
 
 export const commentsApi = {
   list: (ticketId) => apiClient.get(`/tickets/${ticketId}/comments/`).then((r) => r.data),
   create: (ticketId, body) =>
     apiClient.post(`/tickets/${ticketId}/comments/`, { body }).then((r) => r.data),
+};
+
+export const componentsApi = {
+  list: () => apiClient.get("/components/").then((r) => r.data),
+  stats: () => apiClient.get("/components/stats").then((r) => r.data),
+  create: (payload) => apiClient.post("/components/", payload).then((r) => r.data),
+  update: (id, payload) => apiClient.patch(`/components/${id}`, payload).then((r) => r.data),
+  remove: (id) => apiClient.delete(`/components/${id}`),
+  tickets: (id) => apiClient.get(`/components/${id}/tickets`).then((r) => r.data),
+};
+
+export const slaApi = {
+  list: () => apiClient.get("/sla/").then((r) => r.data),
+  set: (priority, thresholdHours) =>
+    apiClient.patch(`/sla/${priority}`, { threshold_hours: thresholdHours }).then((r) => r.data),
 };
 
 export const labelsApi = {

@@ -1781,3 +1781,177 @@
 }
 .user-link:hover { background: var(--color-panel-alt); }
 
+
+/* ==========================================================================
+   Components, clients, SLA
+   ========================================================================== */
+.component-chip {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  border: 1px solid;
+  background: transparent;
+  white-space: nowrap;
+}
+
+.ticket-subrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 6px 0 2px;
+}
+
+.client-tag {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.client-tag::before {
+  content: "â—ˆ ";
+  color: var(--color-text-faint);
+}
+
+/* --- SLA badge --- */
+.sla-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 20px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+.sla-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.sla-badge.ok {
+  color: var(--priority-low);
+  border-color: rgba(95, 184, 138, 0.4);
+  background: rgba(95, 184, 138, 0.08);
+}
+
+.sla-badge.at-risk {
+  color: var(--priority-high);
+  border-color: rgba(245, 166, 35, 0.45);
+  background: rgba(245, 166, 35, 0.1);
+}
+
+.sla-badge.breached {
+  color: var(--priority-urgent);
+  border-color: var(--priority-urgent);
+  background: rgba(229, 72, 77, 0.14);
+  /* A breached SLA on a support queue is the one thing that should not be
+     possible to scroll past without noticing. */
+  animation: sla-pulse 2s ease-in-out infinite;
+}
+
+@keyframes sla-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0); }
+  50%      { box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.18); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sla-badge.breached { animation: none; }
+}
+
+.sla-badge.stopped {
+  animation: none;
+  opacity: 0.75;
+}
+.sla-badge.stopped.met {
+  color: var(--priority-low);
+  border-color: rgba(95, 184, 138, 0.35);
+  background: transparent;
+}
+.sla-badge.stopped.breached {
+  color: var(--priority-urgent);
+  border-color: rgba(229, 72, 77, 0.35);
+  background: transparent;
+}
+
+.sla-dot.breached { background: var(--priority-urgent); }
+
+/* Card gets a red edge when it's past its SLA â€” visible without reading. */
+.ticket-card:has(.sla-badge.breached) {
+  border-color: rgba(229, 72, 77, 0.55);
+}
+
+.sla-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-alt);
+  border: 1px solid var(--color-border);
+}
+
+.sla-note {
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.breach-chip {
+  gap: 6px;
+}
+.breach-chip.active {
+  border-color: var(--priority-urgent);
+  color: var(--priority-urgent);
+  background: rgba(229, 72, 77, 0.1);
+}
+
+.breached-pill {
+  border-color: var(--priority-urgent) !important;
+  color: var(--priority-urgent) !important;
+  background: rgba(229, 72, 77, 0.1) !important;
+}
+
+.sla-input-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sla-hours {
+  width: 74px;
+  flex: none;
+  text-align: right;
+  border-color: var(--color-border);
+}
+
+/* --- Components page --- */
+.component-form {
+  grid-template-columns: 1.2fr 2fr 1fr auto auto;
+}
+
+.component-stats {
+  align-items: center;
+}
+
+.component-lead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+.component-lead .filter-select { flex: 1; }
+

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 
-import { labelsApi, usersApi, errorMessage } from "../api/resources";
+import { labelsApi, usersApi, slaApi, errorMessage } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
-import { Avatar } from "../board/constants";
+import { Avatar, PRIORITY_LABELS, PriorityIcon } from "../board/constants";
 
 const ROLES = ["admin", "manager", "developer"];
 const ROLE_HINTS = {
@@ -268,6 +268,87 @@ function PeoplePanel({ isAdmin, currentUser }) {
   );
 }
 
+function SlaPanel({ canManage }) {
+  const [policies, setPolicies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(null);
+
+  useEffect(() => {
+    slaApi
+      .list()
+      .then(setPolicies)
+      .catch((err) => setError(errorMessage(err, "Couldn't load SLA policies.")))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function save(priority, raw) {
+    const hours = raw === "" ? null : Number(raw);
+    setBusy(priority);
+    setError("");
+    try {
+      const saved = await slaApi.set(priority, hours);
+      setPolicies((prev) => prev.map((p) => (p.priority === priority ? saved : p)));
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't save that SLA."));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="settings-panel">
+      <div className="settings-panel-head">
+        <h3>SLA targets</h3>
+        <p className="chart-sub">
+          How long a ticket of each priority may sit before it counts as breached.
+          Leave blank to switch the SLA off. The clock stops when a ticket is done.
+        </p>
+      </div>
+
+      {error && <div className="banner-error" role="alert">{error}</div>}
+
+      {loading ? (
+        <p className="empty-state">Loading…</p>
+      ) : (
+        <ul className="settings-list">
+          {policies.map((p) => (
+            <li key={p.priority} className="settings-row">
+              <PriorityIcon priority={p.priority} size={16} />
+              <span className="settings-row-name">{PRIORITY_LABELS[p.priority]}</span>
+              {canManage ? (
+                <div className="sla-input-group">
+                  <input
+                    type="number"
+                    min="1"
+                    max="8760"
+                    className="inline-input sla-hours"
+                    defaultValue={p.threshold_hours ?? ""}
+                    placeholder="off"
+                    disabled={busy === p.priority}
+                    onBlur={(e) => {
+                      const next = e.target.value;
+                      const current = p.threshold_hours ?? "";
+                      if (String(next) !== String(current)) save(p.priority, next);
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                    aria-label={`SLA hours for ${PRIORITY_LABELS[p.priority]}`}
+                  />
+                  <span className="settings-row-sub">hours</span>
+                </div>
+              ) : (
+                <span className="settings-row-sub">
+                  {p.threshold_hours ? `${p.threshold_hours}h` : "no SLA"}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export default function Settings() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -282,6 +363,7 @@ export default function Settings() {
       <div className="settings-grid">
         <LabelsPanel canManage={canManage} />
         <PeoplePanel isAdmin={isAdmin} currentUser={user} />
+        <SlaPanel canManage={canManage} />
       </div>
     </div>
   );

@@ -48,7 +48,10 @@ def list_tickets(
     sprint_id: Optional[uuid.UUID] = Query(default=None),
     epic_id: Optional[uuid.UUID] = Query(default=None),
     label_id: Optional[uuid.UUID] = Query(default=None),
-    search: Optional[str] = Query(default=None, description="Matches title or description"),
+    component_id: Optional[uuid.UUID] = Query(default=None),
+    client_name: Optional[str] = Query(default=None),
+    breached: Optional[bool] = Query(default=None, description="Only tickets past their SLA"),
+    search: Optional[str] = Query(default=None, description="Matches title, description, client, or ticket number"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -61,8 +64,20 @@ def list_tickets(
         sprint_id=sprint_id,
         epic_id=epic_id,
         label_id=label_id,
+        component_id=component_id,
+        client_name=client_name,
+        breached=breached,
         search=search,
     )
+
+
+@router.get("/clients", response_model=list[str])
+def list_clients(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Distinct client names, for autocomplete. Declared before /{ticket_id}."""
+    return crud.get_client_names(db)
 
 
 @router.post("/", response_model=TicketOut, status_code=status.HTTP_201_CREATED)

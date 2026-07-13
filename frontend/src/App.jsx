@@ -9,6 +9,7 @@ import Reports from "./pages/Reports";
 import Sprints from "./pages/Sprints";
 import Settings from "./pages/Settings";
 import Profile from "./pages/Profile";
+import Components from "./pages/Components";
 import Placeholder from "./pages/Placeholder";
 
 function ProtectedRoute({ children }) {
@@ -47,16 +48,7 @@ function AppRoutes() {
         />
         <Route path="/reports" element={<Reports />} />
         <Route path="/sprints" element={<Sprints />} />
-        <Route
-          path="/components"
-          element={
-            <Placeholder
-              title="Components"
-              blurb="Group tickets by the part of the system they touch."
-              planned={["Define components", "Auto-assign a default owner per component"]}
-            />
-          }
-        />
+        <Route path="/components" element={<Components />} />
         <Route
           path="/issues"
           element={

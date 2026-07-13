@@ -85,6 +85,64 @@ class LabelOut(BaseModel):
     color: str
 
 
+# ---------- Components ----------
+class ComponentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    description: Optional[str] = Field(default=None, max_length=300)
+    color: str = Field(default="#3E7BFA", pattern=HEX_COLOR)
+    lead_id: Optional[uuid.UUID] = None
+
+
+class ComponentUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    description: Optional[str] = Field(default=None, max_length=300)
+    color: Optional[str] = Field(default=None, pattern=HEX_COLOR)
+    lead_id: Optional[uuid.UUID] = None
+
+
+class ComponentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    description: Optional[str]
+    color: str
+    lead: Optional[UserOut] = None
+
+
+class ComponentStats(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    description: Optional[str]
+    color: str
+    lead: Optional[UserOut] = None
+    open_tickets: int
+    total_tickets: int
+    breached: int
+
+
+# ---------- SLA ----------
+class SLAPolicyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    priority: TicketPriority
+    threshold_hours: Optional[int]
+
+
+class SLAPolicyUpdate(BaseModel):
+    # Null switches the SLA off for this priority.
+    threshold_hours: Optional[int] = Field(default=None, ge=1, le=8760)
+
+
+class SLAOut(BaseModel):
+    """The live clock on a ticket. Everything here is derived, never stored —
+    storing 'overdue' would be a lie the moment the clock ticks past it."""
+    threshold_hours: int
+    elapsed_seconds: int
+    remaining_seconds: int   # negative once breached
+    breached: bool
+    stopped: bool            # true once resolved: the clock is frozen
+
+
 # ---------- Sprints ----------
 class SprintCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
@@ -157,6 +215,8 @@ class TicketCreate(BaseModel):
     assignee_id: Optional[uuid.UUID] = None
     sprint_id: Optional[uuid.UUID] = None
     epic_id: Optional[uuid.UUID] = None
+    component_id: Optional[uuid.UUID] = None
+    client_name: Optional[str] = Field(default=None, max_length=120)
     due_date: Optional[datetime] = None
     label_ids: list[uuid.UUID] = Field(default_factory=list)
 
@@ -171,6 +231,8 @@ class TicketUpdate(BaseModel):
     assignee_id: Optional[uuid.UUID] = None
     sprint_id: Optional[uuid.UUID] = None
     epic_id: Optional[uuid.UUID] = None
+    component_id: Optional[uuid.UUID] = None
+    client_name: Optional[str] = Field(default=None, max_length=120)
     due_date: Optional[datetime] = None
     # Omit to leave labels untouched; pass [] to clear them.
     label_ids: Optional[list[uuid.UUID]] = None
@@ -195,6 +257,9 @@ class TicketBulkUpdate(BaseModel):
     clear_assignee: bool = False
     sprint_id: Optional[uuid.UUID] = None
     clear_sprint: bool = False
+    component_id: Optional[uuid.UUID] = None
+    clear_component: bool = False
+    client_name: Optional[str] = Field(default=None, max_length=120)
 
     add_label_ids: list[uuid.UUID] = Field(default_factory=list)
     remove_label_ids: list[uuid.UUID] = Field(default_factory=list)
@@ -228,8 +293,14 @@ class TicketOut(BaseModel):
     assignee: Optional[UserOut]
     reporter: Optional[UserOut]
     labels: list[LabelOut]
+    component: Optional[ComponentOut]
+    client_name: Optional[str]
     sprint_id: Optional[uuid.UUID]
     epic_id: Optional[uuid.UUID]
+    resolved_at: Optional[datetime]
+    # Computed per request, not stored — see SLAOut. None when this priority
+    # has no SLA configured.
+    sla: Optional[SLAOut] = None
     created_at: datetime
     updated_at: datetime
 

@@ -5,13 +5,21 @@ export default function BoardToolbar({
   setFilters,
   users,
   labels,
+  components = [],
   onNewTicket,
   resultCount,
+  breachedCount = 0,
 }) {
   const set = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
 
   const active =
-    filters.search || filters.assignee_id || filters.label_id || filters.priority || filters.ticket_type;
+    filters.search ||
+    filters.assignee_id ||
+    filters.label_id ||
+    filters.priority ||
+    filters.ticket_type ||
+    filters.component_id ||
+    filters.breached;
 
   return (
     <div className="board-toolbar">
@@ -45,6 +53,20 @@ export default function BoardToolbar({
           })}
         </div>
 
+        {/* Component first — on a queue spanning several products, "which
+            product?" is the question people filter by most. */}
+        <select
+          className="filter-select"
+          value={filters.component_id}
+          onChange={set("component_id")}
+          aria-label="Filter by component"
+        >
+          <option value="">All components</option>
+          {components.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+
         <select className="filter-select" value={filters.label_id} onChange={set("label_id")} aria-label="Filter by label">
           <option value="">All labels</option>
           {labels.map((l) => (
@@ -66,12 +88,33 @@ export default function BoardToolbar({
           ))}
         </select>
 
+        {/* The support engineer's morning view, in one click. */}
+        <button
+          type="button"
+          className={`toggle-chip breach-chip ${filters.breached ? "active" : ""}`}
+          onClick={() =>
+            setFilters((f) => ({ ...f, breached: f.breached ? "" : "true" }))
+          }
+          title="Show only tickets past their SLA"
+        >
+          <span className="sla-dot breached" aria-hidden="true" />
+          Breached{breachedCount > 0 ? ` (${breachedCount})` : ""}
+        </button>
+
         {active && (
           <button
             type="button"
             className="btn-ghost"
             onClick={() =>
-              setFilters({ search: "", assignee_id: "", label_id: "", priority: "", ticket_type: "" })
+              setFilters({
+                search: "",
+                assignee_id: "",
+                label_id: "",
+                priority: "",
+                ticket_type: "",
+                component_id: "",
+                breached: "",
+              })
             }
           >
             Clear ({resultCount})

@@ -2,6 +2,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
 import { TypeIcon, PriorityIcon, Avatar } from "../board/constants";
+import SlaBadge from "./SlaBadge";
 
 /** Readable text on an arbitrary label colour (YIQ contrast). */
 function readableOn(hex) {
@@ -38,8 +39,19 @@ export function TicketCardBody({ ticket, dragging = false, selected = false }) {
         selected ? "selected" : "",
       ].join(" ")}
     >
-      {ticket.labels.length > 0 && (
+      {(ticket.component || ticket.labels.length > 0) && (
         <div className="label-row">
+          {/* Component first: on a queue spanning OTRAMS / RateNet / rePUSHTI,
+              "which product is this?" is the first question, every time. */}
+          {ticket.component && (
+            <span
+              className="component-chip"
+              style={{ borderColor: ticket.component.color, color: ticket.component.color }}
+              title={ticket.component.description || ticket.component.name}
+            >
+              {ticket.component.name}
+            </span>
+          )}
           {ticket.labels.map((l) => (
             <LabelChip key={l.id} label={l} />
           ))}
@@ -47,6 +59,17 @@ export function TicketCardBody({ ticket, dragging = false, selected = false }) {
       )}
 
       <p className="ticket-title">{ticket.title}</p>
+
+      {(ticket.client_name || ticket.sla) && (
+        <div className="ticket-subrow">
+          {ticket.client_name && (
+            <span className="client-tag" title={`Raised by ${ticket.client_name}`}>
+              {ticket.client_name}
+            </span>
+          )}
+          <SlaBadge sla={ticket.sla} compact />
+        </div>
+      )}
 
       <div className="ticket-meta">
         <div className="ticket-meta-left">
