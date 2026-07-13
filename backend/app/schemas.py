@@ -286,6 +286,39 @@ class TicketMove(BaseModel):
     after_id: Optional[uuid.UUID] = None   # the card it lands below
 
 
+# ---------- Attachments ----------
+class AttachmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    filename: str
+    content_type: str
+    size_bytes: int
+    url: str
+    uploaded_by: Optional[UserOut]
+    created_at: datetime
+
+
+# ---------- Saved filters ----------
+class SavedFilterCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    query: dict = Field(default_factory=dict)
+    pinned: bool = False
+
+
+class SavedFilterUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    query: Optional[dict] = None
+    pinned: Optional[bool] = None
+
+
+class SavedFilterOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    query: dict
+    pinned: bool
+
+
 class SubtaskOut(BaseModel):
     """A sub-task as seen from its parent. Deliberately NOT TicketOut — nesting
     the full shape would recurse (a sub-task has a parent has sub-tasks...) and
@@ -331,6 +364,8 @@ class TicketOut(BaseModel):
     epic_id: Optional[uuid.UUID]
     parent_id: Optional[uuid.UUID]
     subtasks: list[SubtaskOut] = []
+    watchers: list[UserOut] = []
+    attachments: list[AttachmentOut] = []
     resolved_at: Optional[datetime]
     # Computed per request, not stored — see SLAOut. None when this priority
     # has no SLA configured.

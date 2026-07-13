@@ -26,6 +26,24 @@ export const ticketsApi = {
     apiClient.post(`/tickets/${id}/subtasks`, payload).then((r) => r.data),
   duplicate: (id) => apiClient.post(`/tickets/${id}/duplicate`).then((r) => r.data),
   convertToEpic: (id) => apiClient.post(`/tickets/${id}/convert-to-epic`).then((r) => r.data),
+
+  watch: (id) => apiClient.post(`/tickets/${id}/watch`).then((r) => r.data),
+  unwatch: (id) => apiClient.delete(`/tickets/${id}/watch`).then((r) => r.data),
+
+  uploadAttachment: (id, file) => {
+    const body = new FormData();
+    body.append("file", file);
+    return apiClient.post(`/tickets/${id}/attachments`, body).then((r) => r.data);
+  },
+  deleteAttachment: (ticketId, attachmentId) =>
+    apiClient.delete(`/tickets/${ticketId}/attachments/${attachmentId}`),
+};
+
+export const filtersApi = {
+  list: () => apiClient.get("/filters/").then((r) => r.data),
+  create: (payload) => apiClient.post("/filters/", payload).then((r) => r.data),
+  update: (id, payload) => apiClient.patch(`/filters/${id}`, payload).then((r) => r.data),
+  remove: (id) => apiClient.delete(`/filters/${id}`),
 };
 
 export const commentsApi = {

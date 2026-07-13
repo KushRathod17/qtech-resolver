@@ -470,6 +470,7 @@ def get_tickets(
     component_id: Optional[uuid.UUID] = None,
     client_name: Optional[str] = None,
     breached: Optional[bool] = None,
+    watcher_id: Optional[uuid.UUID] = None,
     include_subtasks: bool = False,
     search: Optional[str] = None,
 ) -> list[models.Ticket]:
@@ -496,6 +497,8 @@ def get_tickets(
         query = query.filter(models.Ticket.labels.any(models.Label.id == label_id))
     if component_id is not None:
         query = query.filter(models.Ticket.component_id == component_id)
+    if watcher_id is not None:
+        query = query.filter(models.Ticket.watchers.any(models.User.id == watcher_id))
     if client_name:
         query = query.filter(models.Ticket.client_name.ilike(f"%{client_name}%"))
     if search:
@@ -854,6 +857,96 @@ def move_ticket(db: Session, ticket: models.Ticket, move: schemas.TicketMove, ac
 
 def delete_ticket(db: Session, ticket: models.Ticket) -> None:
     db.delete(ticket)
+    db.commit()
+
+
+# ---------- Watchers ----------
+def watch_ticket(db: Session, ticket: models.Ticket, user: models.User) -> models.Ticket:
+    if user not in ticket.watchers:
+        ticket.watchers.append(user)
+        db.commit()
+        db.refresh(ticket)
+    return ticket
+
+
+def unwatch_ticket(db: Session, ticket: models.Ticket, user: models.User) -> models.Ticket:
+    if user in ticket.watchers:
+        ticket.watchers.remove(user)
+        db.commit()
+        db.refresh(ticket)
+    return ticket
+
+
+# ---------- Attachments ----------
+def create_attachment(
+    db: Session,
+    ticket: models.Ticket,
+    uploader_id: uuid.UUID,
+    filename: str,
+    stored_name: str,
+    content_type: str,
+    size_bytes: int,
+) -> models.Attachment:
+    attachment = models.Attachment(
+        ticket_id=ticket.id,
+        uploaded_by_id=uploader_id,
+        filename=filename,
+        stored_name=stored_name,
+        content_type=content_type,
+        size_bytes=size_bytes,
+    )
+    db.add(attachment)
+    log_activity(db, ticket.id, uploader_id, "attached", filename)
+    db.commit()
+    db.refresh(attachment)
+    return attachment
+
+
+def get_attachment(db: Session, attachment_id: uuid.UUID) -> models.Attachment | None:
+    return db.query(models.Attachment).filter(models.Attachment.id == attachment_id).first()
+
+
+def delete_attachment(db: Session, attachment: models.Attachment) -> None:
+    db.delete(attachment)
+    db.commit()
+
+
+# ---------- Saved filters ----------
+def get_saved_filters(db: Session, user_id: uuid.UUID) -> list[models.SavedFilter]:
+    return (
+        db.query(models.SavedFilter)
+        .filter(models.SavedFilter.user_id == user_id)
+        .order_by(models.SavedFilter.pinned.desc(), models.SavedFilter.created_at)
+        .all()
+    )
+
+
+def get_saved_filter(db: Session, filter_id: uuid.UUID) -> models.SavedFilter | None:
+    return db.query(models.SavedFilter).filter(models.SavedFilter.id == filter_id).first()
+
+
+def create_saved_filter(
+    db: Session, user_id: uuid.UUID, payload: schemas.SavedFilterCreate
+) -> models.SavedFilter:
+    saved = models.SavedFilter(user_id=user_id, **payload.model_dump())
+    db.add(saved)
+    db.commit()
+    db.refresh(saved)
+    return saved
+
+
+def update_saved_filter(
+    db: Session, saved: models.SavedFilter, payload: schemas.SavedFilterUpdate
+) -> models.SavedFilter:
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(saved, field, value)
+    db.commit()
+    db.refresh(saved)
+    return saved
+
+
+def delete_saved_filter(db: Session, saved: models.SavedFilter) -> None:
+    db.delete(saved)
     db.commit()
 
 

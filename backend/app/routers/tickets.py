@@ -1,18 +1,25 @@
 import uuid
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Query
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db, get_current_user, require_role
 from ..models import User, UserRole, TicketStatus, TicketPriority, TicketType
 from ..schemas import (
     TicketCreate, TicketUpdate, TicketMove, TicketOut, ActivityLogOut,
-    TicketBulkUpdate, TicketBulkDelete, SubtaskCreate,
+    TicketBulkUpdate, TicketBulkDelete, SubtaskCreate, AttachmentOut,
 )
 from .. import crud
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
+
+ATTACHMENT_DIR = Path(__file__).resolve().parent.parent.parent / "uploads" / "attachments"
+ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Anything bigger belongs in a file share with a link pasted in a comment.
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
 
 # Declared before /{ticket_id} so "bulk" is never parsed as a ticket UUID.
@@ -51,6 +58,7 @@ def list_tickets(
     component_id: Optional[uuid.UUID] = Query(default=None),
     client_name: Optional[str] = Query(default=None),
     breached: Optional[bool] = Query(default=None, description="Only tickets past their SLA"),
+    watching: bool = Query(default=False, description="Only tickets you watch"),
     include_subtasks: bool = Query(default=False, description="Sub-tasks are hidden by default"),
     search: Optional[str] = Query(default=None, description="Matches title, description, client, or ticket number"),
     db: Session = Depends(get_db),
@@ -68,6 +76,7 @@ def list_tickets(
         component_id=component_id,
         client_name=client_name,
         breached=breached,
+        watcher_id=current_user.id if watching else None,
         include_subtasks=include_subtasks,
         search=search,
     )
@@ -202,6 +211,91 @@ def convert_to_epic(
     if ticket.parent_id:
         raise HTTPException(status_code=400, detail="Detach this sub-task from its parent first")
     return crud.convert_to_epic(db, ticket, actor_id=current_user.id)
+
+
+@router.post("/{ticket_id}/watch", response_model=TicketOut)
+def watch_ticket(
+    ticket_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ticket = crud.get_ticket(db, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return crud.watch_ticket(db, ticket, current_user)
+
+
+@router.delete("/{ticket_id}/watch", response_model=TicketOut)
+def unwatch_ticket(
+    ticket_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ticket = crud.get_ticket(db, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return crud.unwatch_ticket(db, ticket, current_user)
+
+
+@router.post("/{ticket_id}/attachments", response_model=AttachmentOut, status_code=status.HTTP_201_CREATED)
+async def upload_attachment(
+    ticket_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ticket = crud.get_ticket(db, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="That file is empty")
+    if len(contents) > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Attachments must be {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB or smaller",
+        )
+
+    # Never build a path from the client's filename — that's how you get
+    # ../../ traversal. Keep the original only as a display label.
+    original = Path(file.filename or "file").name
+    suffix = Path(original).suffix[:12]
+    stored = f"{uuid.uuid4().hex}{suffix}"
+    (ATTACHMENT_DIR / stored).write_bytes(contents)
+
+    return crud.create_attachment(
+        db,
+        ticket,
+        uploader_id=current_user.id,
+        filename=original,
+        stored_name=stored,
+        content_type=file.content_type or "application/octet-stream",
+        size_bytes=len(contents),
+    )
+
+
+@router.delete("/{ticket_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_attachment(
+    ticket_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    attachment = crud.get_attachment(db, attachment_id)
+    if not attachment or attachment.ticket_id != ticket_id:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    # Your own upload, or a manager cleaning up.
+    privileged = current_user.role in (UserRole.ADMIN, UserRole.MANAGER)
+    if attachment.uploaded_by_id != current_user.id and not privileged:
+        raise HTTPException(status_code=403, detail="You can only delete your own attachments")
+
+    stored = ATTACHMENT_DIR / attachment.stored_name
+    if stored.is_file() and stored.parent == ATTACHMENT_DIR:
+        stored.unlink(missing_ok=True)
+
+    crud.delete_attachment(db, attachment)
 
 
 @router.get("/{ticket_id}/activity", response_model=list[ActivityLogOut])

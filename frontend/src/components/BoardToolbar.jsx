@@ -6,6 +6,10 @@ export default function BoardToolbar({
   users,
   labels,
   components = [],
+  savedFilters = [],
+  onSaveFilter,
+  onDeleteFilter,
+  onApplySavedFilter,
   onNewTicket,
   resultCount,
   breachedCount = 0,
@@ -19,10 +23,50 @@ export default function BoardToolbar({
     filters.priority ||
     filters.ticket_type ||
     filters.component_id ||
-    filters.breached;
+    filters.breached ||
+    filters.watching;
+
+  const pinned = savedFilters.filter((f) => f.pinned);
+
+  // A saved filter is "on" when every key it stores currently matches.
+  const isApplied = (saved) =>
+    Object.entries(saved.query).every(([k, v]) => String(filters[k] ?? "") === String(v));
 
   return (
     <div className="board-toolbar">
+      {/* Pinned filters: the whole point is that "my open criticals" is one
+          click every morning, not five dropdowns. */}
+      {pinned.length > 0 && (
+        <div className="pinned-filters">
+          {pinned.map((saved) => (
+            <button
+              key={saved.id}
+              type="button"
+              className={`toggle-chip pinned-chip ${isApplied(saved) ? "active" : ""}`}
+              onClick={() => onApplySavedFilter(saved)}
+              title={Object.entries(saved.query)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(", ")}
+            >
+              ★ {saved.name}
+              <span
+                className="pinned-x"
+                role="button"
+                tabIndex={0}
+                aria-label={`Delete filter ${saved.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteFilter(saved);
+                }}
+                onKeyDown={(e) => e.key === "Enter" && onDeleteFilter(saved)}
+              >
+                ✕
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="toolbar-left">
         <input
           className="search-input"
@@ -101,6 +145,23 @@ export default function BoardToolbar({
           Breached{breachedCount > 0 ? ` (${breachedCount})` : ""}
         </button>
 
+        <button
+          type="button"
+          className={`toggle-chip ${filters.watching ? "active" : ""}`}
+          onClick={() =>
+            setFilters((f) => ({ ...f, watching: f.watching ? "" : "true" }))
+          }
+          title="Tickets you're watching"
+        >
+          👁 Watching
+        </button>
+
+        {active && (
+          <button type="button" className="btn-ghost" onClick={onSaveFilter}>
+            ★ Save filter
+          </button>
+        )}
+
         {active && (
           <button
             type="button"
@@ -114,6 +175,7 @@ export default function BoardToolbar({
                 ticket_type: "",
                 component_id: "",
                 breached: "",
+                watching: "",
               })
             }
           >

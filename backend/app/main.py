@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
-from .routers import auth, tickets, comments, users, labels, sprints, components
+from .routers import auth, tickets, comments, users, labels, sprints, components, filters
 
 # Schema is owned by Alembic now, not create_all(). create_all only ever ADDS
 # missing tables — it silently ignores changes to existing ones, which is how a
@@ -33,6 +33,7 @@ app.include_router(labels.router)
 app.include_router(sprints.router)
 app.include_router(components.router)
 app.include_router(components.sla_router)
+app.include_router(filters.router)
 
 
 @app.get("/health")

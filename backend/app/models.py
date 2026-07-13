@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, String, Text, DateTime, Date, ForeignKey, Integer, Float,
-    Table, Sequence, Enum as SAEnum
+    Boolean, JSON, Table, Sequence, Enum as SAEnum
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship, backref
@@ -60,6 +60,15 @@ ticket_labels = Table(
     Column("label_id", UUID(as_uuid=True), ForeignKey("labels.id", ondelete="CASCADE"), primary_key=True),
 )
 
+# Watching is how you follow a ticket you aren't assigned to — the escalation
+# you handed over but still own the client relationship for.
+ticket_watchers = Table(
+    "ticket_watchers",
+    Base.metadata,
+    Column("ticket_id", UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), primary_key=True),
+    Column("user_id", UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+)
+
 
 class User(Base):
     __tablename__ = "users"
@@ -76,6 +85,7 @@ class User(Base):
 
     tickets_assigned = relationship("Ticket", back_populates="assignee", foreign_keys="Ticket.assignee_id")
     tickets_reported = relationship("Ticket", back_populates="reporter", foreign_keys="Ticket.created_by_id")
+    watching = relationship("Ticket", secondary=ticket_watchers, back_populates="watchers")
     comments = relationship("Comment", back_populates="author")
 
 
@@ -204,10 +214,58 @@ class Ticket(Base):
     labels = relationship("Label", secondary=ticket_labels, back_populates="tickets", lazy="selectin")
     comments = relationship("Comment", back_populates="ticket", cascade="all, delete-orphan")
     activity_logs = relationship("ActivityLog", back_populates="ticket", cascade="all, delete-orphan")
+    attachments = relationship(
+        "Attachment", back_populates="ticket", cascade="all, delete-orphan", lazy="selectin"
+    )
+    watchers = relationship(
+        "User", secondary=ticket_watchers, back_populates="watching", lazy="selectin"
+    )
 
     @property
     def key(self) -> str:
         return f"{TICKET_KEY_PREFIX}-{self.ticket_number}"
+
+
+class SavedFilter(Base):
+    """A named filter combo, owned by one user. Pinned ones become one-click
+    chips in the board toolbar — the fix for rebuilding "my open criticals"
+    every morning."""
+    __tablename__ = "saved_filters"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    # The filter itself: {"priority": "highest", "assignee_id": "...", ...}.
+    # JSON rather than columns, because the set of filterable fields will keep
+    # growing and each one shouldn't cost a migration.
+    query = Column(JSON, nullable=False, default=dict)
+    pinned = Column(Boolean, nullable=False, server_default="false")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
+
+class Attachment(Base):
+    __tablename__ = "attachments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticket_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False, index=True)
+    uploaded_by_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # What the user called it, versus what we actually wrote to disk. Never
+    # trust the client's filename as a path.
+    filename = Column(String, nullable=False)
+    stored_name = Column(String, nullable=False)
+    content_type = Column(String, nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    ticket = relationship("Ticket", back_populates="attachments")
+    uploaded_by = relationship("User")
+
+    @property
+    def url(self) -> str:
+        return f"/uploads/attachments/{self.stored_name}"
 
 
 class Comment(Base):

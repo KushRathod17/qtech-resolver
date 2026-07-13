@@ -17,6 +17,7 @@ import {
   usersApi,
   sprintsApi,
   componentsApi,
+  filtersApi,
   errorMessage,
 } from "../api/resources";
 import { COLUMNS } from "../board/constants";
@@ -34,6 +35,7 @@ const EMPTY_FILTERS = {
   ticket_type: "",
   component_id: "",
   breached: "", // "" = any, "true" = only tickets past their SLA
+  watching: "", // "" = any, "true" = only tickets I watch
 };
 
 export default function Board() {
@@ -43,6 +45,7 @@ export default function Board() {
   const [sprints, setSprints] = useState([]);
   const [components, setComponents] = useState([]);
   const [clients, setClients] = useState([]);
+  const [savedFilters, setSavedFilters] = useState([]);
 
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -94,16 +97,53 @@ export default function Board() {
       sprintsApi.list(),
       componentsApi.list(),
       ticketsApi.clients(),
+      filtersApi.list(),
     ])
-      .then(([u, l, s, c, cl]) => {
+      .then(([u, l, s, c, cl, sf]) => {
         setUsers(u);
         setLabels(l);
         setSprints(s);
         setComponents(c);
         setClients(cl);
+        setSavedFilters(sf);
       })
       .catch((err) => setError(errorMessage(err, "Couldn't load board reference data.")));
   }, []);
+
+  async function handleSaveFilter() {
+    const name = window.prompt(
+      "Name this filter (it'll be pinned to the toolbar):",
+      "My open criticals"
+    );
+    if (!name?.trim()) return;
+    try {
+      // Only the filters actually set — an empty key would pin a no-op.
+      const query = Object.fromEntries(
+        Object.entries({ ...filters, search: debouncedSearch }).filter(([, v]) => v !== "")
+      );
+      const created = await filtersApi.create({ name: name.trim(), query, pinned: true });
+      setSavedFilters((prev) => [...prev, created]);
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't save that filter."));
+    }
+  }
+
+  async function handleDeleteFilter(saved) {
+    try {
+      await filtersApi.remove(saved.id);
+      setSavedFilters((prev) => prev.filter((f) => f.id !== saved.id));
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't delete that filter."));
+    }
+  }
+
+  function applySavedFilter(saved) {
+    // Toggle: clicking an already-applied filter clears it.
+    const applied = Object.entries(saved.query).every(
+      ([k, v]) => String(filters[k] ?? "") === String(v)
+    );
+    setFilters(applied ? EMPTY_FILTERS : { ...EMPTY_FILTERS, ...saved.query });
+  }
 
   // Escape is the universal "never mind" — it should drop a selection too.
   useEffect(() => {
@@ -300,6 +340,10 @@ export default function Board() {
         users={users}
         labels={labels}
         components={components}
+        savedFilters={savedFilters}
+        onSaveFilter={handleSaveFilter}
+        onDeleteFilter={handleDeleteFilter}
+        onApplySavedFilter={applySavedFilter}
         onNewTicket={() => setCreating(true)}
         resultCount={tickets.length}
         breachedCount={tickets.filter((t) => t.sla?.breached && !t.sla.stopped).length}

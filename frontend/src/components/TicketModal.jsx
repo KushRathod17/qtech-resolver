@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import LabelPicker from "./LabelPicker";
 import SlaBadge from "./SlaBadge";
 import SubtaskList from "./SubtaskList";
+import AttachmentList from "./AttachmentList";
 import {
   COLUMNS,
   PRIORITIES,
@@ -153,6 +154,23 @@ export default function TicketModal({
     }
   }
 
+  const isWatching = !isNew && (ticket.watchers || []).some((w) => w.id === user?.id);
+
+  async function toggleWatch() {
+    setSaving(true);
+    setError("");
+    try {
+      const saved = isWatching
+        ? await ticketsApi.unwatch(ticket.id)
+        : await ticketsApi.watch(ticket.id);
+      onSaved(saved);
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't update your watch on this ticket."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleDuplicate() {
     setSaving(true);
     setError("");
@@ -207,9 +225,25 @@ export default function TicketModal({
             <TypeIcon type={form.ticket_type} size={18} />
             <span className="ticket-id">{isNew ? "New ticket" : ticket.key}</span>
           </div>
-          <button type="button" className="btn-ghost" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
+          <div className="panel-header-actions">
+            {!isNew && (
+              <button
+                type="button"
+                className={`toggle-chip watch-chip ${isWatching ? "active" : ""}`}
+                onClick={toggleWatch}
+                disabled={saving}
+                title={isWatching ? "Stop watching this ticket" : "Watch this ticket"}
+              >
+                {isWatching ? "👁 Watching" : "👁 Watch"}
+                {(ticket.watchers || []).length > 0 && (
+                  <span className="watch-count">{ticket.watchers.length}</span>
+                )}
+              </button>
+            )}
+            <button type="button" className="btn-ghost" onClick={onClose} aria-label="Close">
+              ✕
+            </button>
+          </div>
         </header>
 
         <div className="panel-body">
@@ -375,6 +409,8 @@ export default function TicketModal({
               {ticket.ticket_type !== "epic" && !ticket.parent_id && (
                 <SubtaskList ticket={ticket} users={users} onChanged={loadThread} />
               )}
+
+              <AttachmentList ticket={ticket} onChanged={loadThread} />
 
               <section className="modal-section">
                 <h4>Comments</h4>
