@@ -79,6 +79,40 @@ class SprintOut(BaseModel):
     end_date: Optional[date]
 
 
+class SprintStats(BaseModel):
+    """Headline numbers for a sprint card."""
+    total_points: int
+    completed_points: int
+    total_tickets: int
+    completed_tickets: int
+
+
+class BurndownPoint(BaseModel):
+    date: date
+    remaining: float          # points still open at end of this day
+    ideal: float              # straight line from total -> 0 across the sprint
+    is_projection: bool       # true for days that haven't happened yet
+
+
+class BurndownOut(BaseModel):
+    sprint: SprintOut
+    total_points: int
+    points: list[BurndownPoint]
+
+
+class VelocityEntry(BaseModel):
+    sprint_id: uuid.UUID
+    sprint_name: str
+    state: SprintState
+    committed_points: int     # everything pulled into the sprint
+    completed_points: int     # what actually reached done
+
+
+class VelocityOut(BaseModel):
+    sprints: list[VelocityEntry]
+    average_velocity: float   # mean completed_points across completed sprints
+
+
 # ---------- Tickets ----------
 class TicketCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)

@@ -34,7 +34,11 @@ export const sprintsApi = {
   list: () => apiClient.get("/sprints/").then((r) => r.data),
   create: (payload) => apiClient.post("/sprints/", payload).then((r) => r.data),
   update: (id, payload) => apiClient.patch(`/sprints/${id}`, payload).then((r) => r.data),
+  remove: (id) => apiClient.delete(`/sprints/${id}`),
   tickets: (id) => apiClient.get(`/sprints/${id}/tickets`).then((r) => r.data),
+  stats: (id) => apiClient.get(`/sprints/${id}/stats`).then((r) => r.data),
+  burndown: (id) => apiClient.get(`/sprints/${id}/burndown`).then((r) => r.data),
+  velocity: () => apiClient.get("/sprints/velocity").then((r) => r.data),
 };
 
 export const usersApi = {

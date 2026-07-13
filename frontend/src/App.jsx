@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import AppLayout from "./components/AppLayout";
 import Login from "./pages/Login";
 import Board from "./pages/Board";
+import Reports from "./pages/Reports";
+import Sprints from "./pages/Sprints";
 import Placeholder from "./pages/Placeholder";
 
 function ProtectedRoute({ children }) {
@@ -39,30 +41,8 @@ function AppRoutes() {
             />
           }
         />
-        <Route
-          path="/reports"
-          element={
-            <Placeholder
-              title="Reports"
-              blurb="Burndown and velocity, built from the sprint and story-point data the API already stores."
-              planned={[
-                "Sprint burndown chart",
-                "Velocity across the last N sprints",
-                "Estimation accuracy per person — how long a 5-pointer really takes",
-              ]}
-            />
-          }
-        />
-        <Route
-          path="/sprints"
-          element={
-            <Placeholder
-              title="Sprints"
-              blurb="Plan, start, and close sprints. The /sprints API is live already."
-              planned={["Create and edit sprints", "Start / complete a sprint", "Carry unfinished work over"]}
-            />
-          }
-        />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="/sprints" element={<Sprints />} />
         <Route
           path="/components"
           element={

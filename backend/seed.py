@@ -112,6 +112,7 @@ specs = [
      ["Tech Debt"], 25),
 ]
 
+done_in_sprint = []
 for title, desc, ttype, tstatus, prio, points, assignee, label_names, due_offset in specs:
     t = crud.create_ticket(db, schemas.TicketCreate(
         title=title,
@@ -126,7 +127,82 @@ for title, desc, ttype, tstatus, prio, points, assignee, label_names, due_offset
         due_date=now + timedelta(days=due_offset),
         label_ids=[labels[n].id for n in label_names],
     ), created_by_id=priya.id)
+    if tstatus == TicketStatus.DONE:
+        done_in_sprint.append(t)
     print(f"  {t.key:<8} {t.status.value:<12} {t.title}")
+
+# These were seeded straight into `done`, so they never logged a transition —
+# and the burndown reads completion from the activity log. Without this the
+# active sprint's line would sit flat at full points.
+for offset, t in enumerate(done_in_sprint):
+    db.add(models.ActivityLog(
+        ticket_id=t.id,
+        actor_id=arjun.id,
+        action="status_changed",
+        details="code_review -> done",
+        created_at=datetime.combine(
+            sprint.start_date + timedelta(days=1 + offset), datetime.min.time()
+        ),
+    ))
+db.commit()
+
+
+# ---------- Historical sprints, so Reports has something real to plot ----------
+# Velocity needs finished sprints; a burndown needs to know *when* each ticket
+# hit done. We backdate the activity log rather than faking a chart series, so
+# the reports are computed from the same data path as the live sprint.
+history = [
+    ("Sprint 11", 21, 18, 38, 24),   # name, committed, completed, days ago start, end
+    ("Sprint 12", 26, 26, 24, 10),
+    ("Sprint 13", 24, 16, 18, 4),
+]
+
+for name, committed, completed, start_ago, end_ago in history:
+    past = crud.create_sprint(db, schemas.SprintCreate(
+        name=name,
+        goal=f"Historical sprint — {completed}/{committed} points delivered.",
+        state=SprintState.COMPLETED,
+        start_date=today - timedelta(days=start_ago),
+        end_date=today - timedelta(days=end_ago),
+    ))
+
+    remaining_done = completed
+    remaining_total = committed
+    n = 0
+    while remaining_total > 0:
+        pts = min(5, remaining_total)
+        finish = pts <= remaining_done
+        n += 1
+
+        t = crud.create_ticket(db, schemas.TicketCreate(
+            title=f"{name} — work item {n}",
+            description="Delivered in a previous sprint.",
+            ticket_type=TicketType.STORY,
+            status=TicketStatus.DONE if finish else TicketStatus.TODO,
+            priority=TicketPriority.MEDIUM,
+            story_points=pts,
+            assignee_id=[arjun.id, sara.id, priya.id][n % 3],
+            sprint_id=past.id,
+            label_ids=[labels["Payments"].id],
+        ), created_by_id=priya.id)
+
+        if finish:
+            remaining_done -= pts
+            # Spread completions across the sprint window so the burndown
+            # descends in steps instead of dropping off a cliff on day one.
+            span = start_ago - end_ago
+            day = past.start_date + timedelta(days=min(span, 1 + (n * span) // 6))
+            db.add(models.ActivityLog(
+                ticket_id=t.id,
+                actor_id=priya.id,
+                action="status_changed",
+                details="in_progress -> done",
+                created_at=datetime.combine(day, datetime.min.time()),
+            ))
+        remaining_total -= pts
+
+    db.commit()
+    print(f"  sprint: {name:<10} completed {completed}/{committed} pts")
 
 db.close()
 print("\nDone. Log in as kanishk@qtechsoftware.com / password123")

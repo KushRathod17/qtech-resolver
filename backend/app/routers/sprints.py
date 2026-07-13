@@ -5,10 +5,23 @@ from sqlalchemy.orm import Session
 
 from ..dependencies import get_db, get_current_user, require_role
 from ..models import User, UserRole
-from ..schemas import SprintCreate, SprintUpdate, SprintOut, TicketOut
+from ..schemas import (
+    SprintCreate, SprintUpdate, SprintOut, TicketOut,
+    SprintStats, BurndownOut, VelocityOut,
+)
 from .. import crud
 
 router = APIRouter(prefix="/sprints", tags=["sprints"])
+
+
+@router.get("/velocity", response_model=VelocityOut)
+def get_velocity(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Committed vs completed points per sprint. Declared before /{sprint_id}
+    so that 'velocity' isn't parsed as a sprint UUID."""
+    return crud.velocity(db)
 
 
 @router.get("/", response_model=list[SprintOut])
@@ -40,6 +53,30 @@ def get_sprint(
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
     return sprint
+
+
+@router.get("/{sprint_id}/stats", response_model=SprintStats)
+def get_sprint_stats(
+    sprint_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sprint = crud.get_sprint(db, sprint_id)
+    if not sprint:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    return crud.sprint_stats(db, sprint)
+
+
+@router.get("/{sprint_id}/burndown", response_model=BurndownOut)
+def get_sprint_burndown(
+    sprint_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sprint = crud.get_sprint(db, sprint_id)
+    if not sprint:
+        raise HTTPException(status_code=404, detail="Sprint not found")
+    return crud.sprint_burndown(db, sprint)
 
 
 @router.get("/{sprint_id}/tickets", response_model=list[TicketOut])

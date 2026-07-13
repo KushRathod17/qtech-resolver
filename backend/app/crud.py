@@ -1,4 +1,5 @@
 import uuid
+from datetime import date, timedelta
 from typing import Optional
 
 from sqlalchemy import or_, func
@@ -129,6 +130,115 @@ def update_sprint(db: Session, sprint: models.Sprint, sprint_in: schemas.SprintU
 def delete_sprint(db: Session, sprint: models.Sprint) -> None:
     db.delete(sprint)
     db.commit()
+
+
+# ---------- Reporting ----------
+def _completion_dates(db: Session, tickets: list[models.Ticket]) -> dict[uuid.UUID, date]:
+    """When did each ticket actually reach `done`?
+
+    Taken from the activity log rather than updated_at, because updated_at moves
+    on any edit — retitling a finished ticket would otherwise silently redraw
+    the burndown. A ticket can bounce out of done and back, so the *last*
+    transition into done wins.
+    """
+    if not tickets:
+        return {}
+
+    ids = [t.id for t in tickets]
+    rows = (
+        db.query(models.ActivityLog)
+        .filter(
+            models.ActivityLog.ticket_id.in_(ids),
+            models.ActivityLog.action == "status_changed",
+            models.ActivityLog.details.ilike("%-> done"),
+        )
+        .order_by(models.ActivityLog.created_at)
+        .all()
+    )
+
+    done_at: dict[uuid.UUID, date] = {}
+    for row in rows:
+        done_at[row.ticket_id] = row.created_at.date()
+
+    # Only count tickets that are still in done; one that was reopened has a
+    # historical transition but isn't complete now.
+    return {
+        t.id: done_at[t.id]
+        for t in tickets
+        if t.status == models.TicketStatus.DONE and t.id in done_at
+    }
+
+
+def sprint_stats(db: Session, sprint: models.Sprint) -> dict:
+    tickets = get_tickets(db, sprint_id=sprint.id)
+    done = [t for t in tickets if t.status == models.TicketStatus.DONE]
+    return {
+        "total_points": sum(t.story_points or 0 for t in tickets),
+        "completed_points": sum(t.story_points or 0 for t in done),
+        "total_tickets": len(tickets),
+        "completed_tickets": len(done),
+    }
+
+
+def sprint_burndown(db: Session, sprint: models.Sprint) -> dict:
+    tickets = get_tickets(db, sprint_id=sprint.id)
+    total = sum(t.story_points or 0 for t in tickets)
+
+    start = sprint.start_date or (sprint.created_at.date() if sprint.created_at else date.today())
+    end = sprint.end_date or start
+    if end < start:
+        end = start
+
+    done_at = _completion_dates(db, tickets)
+    points_done_on = {}
+    for ticket in tickets:
+        if ticket.id in done_at:
+            points_done_on.setdefault(done_at[ticket.id], 0)
+            points_done_on[done_at[ticket.id]] += ticket.story_points or 0
+
+    span = (end - start).days
+    today = date.today()
+
+    series = []
+    remaining = float(total)
+    for offset in range(span + 1):
+        day = start + timedelta(days=offset)
+        remaining -= points_done_on.get(day, 0)
+        # A straight line from total on day 0 to zero on the final day.
+        ideal = total - (total * offset / span) if span else 0.0
+        series.append({
+            "date": day,
+            # Don't draw the "actual" line into the future — flat-lining it
+            # there reads as a stalled sprint rather than one still running.
+            "remaining": remaining,
+            "ideal": round(ideal, 2),
+            "is_projection": day > today,
+        })
+
+    return {"sprint": sprint, "total_points": total, "points": series}
+
+
+def velocity(db: Session) -> dict:
+    sprints = sorted(get_sprints(db), key=lambda s: (s.start_date or date.min, s.created_at))
+
+    entries = []
+    for sprint in sprints:
+        tickets = get_tickets(db, sprint_id=sprint.id)
+        done = [t for t in tickets if t.status == models.TicketStatus.DONE]
+        entries.append({
+            "sprint_id": sprint.id,
+            "sprint_name": sprint.name,
+            "state": sprint.state,
+            "committed_points": sum(t.story_points or 0 for t in tickets),
+            "completed_points": sum(t.story_points or 0 for t in done),
+        })
+
+    # Average only over finished sprints — an in-flight sprint would drag the
+    # mean down purely because it isn't over yet.
+    finished = [e for e in entries if e["state"] == models.SprintState.COMPLETED]
+    average = sum(e["completed_points"] for e in finished) / len(finished) if finished else 0.0
+
+    return {"sprints": entries, "average_velocity": round(average, 1)}
 
 
 # ---------- Ticket CRUD ----------
