@@ -1194,3 +1194,156 @@
   text-decoration: underline;
 }
 
+
+/* ==========================================================================
+   Settings
+   ========================================================================== */
+.settings-page {
+  padding: 24px 28px 40px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.settings-panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px 20px;
+}
+
+.settings-panel-head h3 {
+  font-family: var(--font-display);
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+
+.settings-panel .banner-error {
+  margin: 0 0 12px;
+}
+
+.label-create {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.label-create .search-input {
+  flex: 1;
+  width: auto;
+}
+
+/* Native colour picker, restyled to read as a swatch rather than a form field. */
+.color-swatch-input {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.color-swatch-input::-webkit-color-swatch-wrapper { padding: 3px; }
+.color-swatch-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 3px;
+}
+
+.color-swatch-static {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.settings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.settings-row:last-child { border-bottom: none; }
+
+.settings-row-name {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13.5px;
+  color: var(--color-text);
+  min-width: 0;
+}
+
+.settings-row-sub {
+  font-size: 11.5px;
+  color: var(--color-text-faint);
+}
+
+/* Looks like plain text until you focus it â€” an editable cell, not a form. */
+.inline-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  color: var(--color-text);
+  font-size: 13.5px;
+  outline: none;
+}
+.inline-input:hover:not(:disabled) { border-color: var(--color-border); }
+.inline-input:focus {
+  border-color: var(--color-accent);
+  background: var(--color-panel-alt);
+}
+.inline-input:disabled { opacity: 0.5; }
+
+.you-tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-accent);
+  background: rgba(62, 123, 250, 0.12);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.role-key {
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: 6px;
+}
+.role-key div {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.role-key dt {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-dim);
+  min-width: 74px;
+}
+.role-key dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-faint);
+}
+

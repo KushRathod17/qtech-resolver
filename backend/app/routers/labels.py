@@ -23,7 +23,9 @@ def list_labels(
 def create_label(
     payload: LabelCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    # Labels are project configuration, not per-ticket data — gated the same way
+    # as deleting one. Developers apply existing labels; they don't mint new ones.
+    current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
 ):
     if crud.get_label_by_name(db, payload.name):
         raise HTTPException(status_code=400, detail="A label with that name already exists")
@@ -35,7 +37,7 @@ def update_label(
     label_id: uuid.UUID,
     payload: LabelUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
 ):
     label = crud.get_label(db, label_id)
     if not label:

@@ -7,6 +7,7 @@ import Signup from "./pages/Signup";
 import Board from "./pages/Board";
 import Reports from "./pages/Reports";
 import Sprints from "./pages/Sprints";
+import Settings from "./pages/Settings";
 import Placeholder from "./pages/Placeholder";
 
 function ProtectedRoute({ children }) {
@@ -65,16 +66,7 @@ function AppRoutes() {
             />
           }
         />
-        <Route
-          path="/settings"
-          element={
-            <Placeholder
-              title="Settings"
-              blurb="Manage labels and people."
-              planned={["Create / recolour / delete labels", "Promote and demote users (admin only)"]}
-            />
-          }
-        />
+        <Route path="/settings" element={<Settings />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/board" replace />} />
