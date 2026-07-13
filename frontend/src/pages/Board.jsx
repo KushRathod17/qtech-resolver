@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   DndContext,
   DragOverlay,
@@ -35,6 +36,9 @@ export default function Board() {
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const anchorId = useRef(null); // for shift-click range selection
+
+  // The command palette navigates here with ?ticket= / ?new= / ?updated=.
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -90,6 +94,25 @@ export default function Board() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Act on the palette's deep links, then strip them so a refresh doesn't
+  // reopen the same modal.
+  useEffect(() => {
+    if (searchParams.get("new")) {
+      setCreating(true);
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    const wanted = searchParams.get("ticket");
+    if (wanted && tickets.length) {
+      const found = tickets.find((t) => t.id === wanted);
+      if (found) setOpenTicket(found);
+      setSearchParams({}, { replace: true });
+    }
+    if (searchParams.get("updated")) {
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, tickets, setSearchParams]);
 
   const byColumn = useMemo(() => {
     const map = Object.fromEntries(COLUMNS.map((c) => [c.key, []]));

@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 
 import Sidebar from "./Sidebar";
+import CommandPalette from "./CommandPalette";
 import { useAuth } from "../context/AuthContext";
 import { Avatar } from "../board/constants";
 
@@ -9,6 +10,8 @@ export default function AppLayout() {
 
   return (
     <div className="app-shell">
+      {/* Available on every page, not just the board. */}
+      <CommandPalette />
       <Sidebar />
 
       <div className="app-main">
@@ -19,6 +22,9 @@ export default function AppLayout() {
           </h1>
 
           <div className="user-pill">
+            <span className="kbd-hint" title="Open the command palette">
+              <kbd>Ctrl</kbd><kbd>K</kbd>
+            </span>
             <Avatar user={user} size={28} />
             <div className="user-meta">
               <span className="user-name">{user?.full_name}</span>
