@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { errorMessage } from "../api/resources";
 
 export default function LoginForm() {
   const [email, setEmail] = useState("");
@@ -17,9 +18,10 @@ export default function LoginForm() {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate("/dashboard");
+      navigate("/board");
     } catch (err) {
-      setError("Invalid email or password. Please try again.");
+      // A dead backend and a wrong password are different problems; say which.
+      setError(errorMessage(err, "Invalid email or password. Please try again."));
     } finally {
       setSubmitting(false);
     }
@@ -39,11 +41,15 @@ export default function LoginForm() {
             <label>Password</label>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           </div>
-          {error && <p className="error-text">{error}</p>}
+          {error && <p className="error-text" role="alert">{error}</p>}
           <button type="submit" className="btn-primary" disabled={submitting} style={{ width: "100%", padding: 10 }}>
             {submitting ? "Signing in..." : "Sign In"}
           </button>
         </form>
+
+        <p className="auth-switch">
+          Don&apos;t have an account? <Link to="/signup">Sign up</Link>
+        </p>
       </div>
     </div>
   );

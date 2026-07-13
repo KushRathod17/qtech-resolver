@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import AppLayout from "./components/AppLayout";
 import Login from "./pages/Login";
+import Signup from "./pages/Signup";
 import Board from "./pages/Board";
 import Reports from "./pages/Reports";
 import Sprints from "./pages/Sprints";
@@ -18,6 +19,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/signup" element={<Signup />} />
 
       <Route
         element={

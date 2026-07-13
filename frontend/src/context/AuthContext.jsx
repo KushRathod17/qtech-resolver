@@ -36,6 +36,19 @@ export function AuthProvider({ children }) {
     setToken(data.access_token);
   };
 
+  const register = async (fullName, email, password) => {
+    // Deliberately no `role` in this payload. The server assigns it (first
+    // account becomes admin, everyone after is a developer); accepting a role
+    // from the client is exactly the privilege-escalation hole we closed.
+    await apiClient.post("/auth/register", {
+      full_name: fullName,
+      email,
+      password,
+    });
+    // Registration doesn't return a token, so sign in with the same credentials.
+    await login(email, password);
+  };
+
   const logout = () => {
     localStorage.removeItem("access_token");
     setToken(null);
@@ -43,7 +56,9 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ token, user, isAuthenticated: !!token, login, logout, loading }}>
+    <AuthContext.Provider
+      value={{ token, user, isAuthenticated: !!token, login, register, logout, loading }}
+    >
       {children}
     </AuthContext.Provider>
   );
