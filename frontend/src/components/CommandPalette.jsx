@@ -17,7 +17,7 @@ import {
  * a word boundary rank higher, so "apay" finds "Add Apple Pay" and "QTR-4"
  * finds itself. Good enough for a few hundred tickets, and no dependency.
  */
-function fuzzyScore(needle, haystack) {
+export function fuzzyScore(needle, haystack) {
   const n = needle.toLowerCase();
   const h = haystack.toLowerCase();
   if (!n) return 0;
@@ -51,7 +51,7 @@ const alphanum = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
  * "QTR-19 — work item 4" above QTR-4 itself, because the letters do technically
  * appear in order. Typing a key must find that ticket.
  */
-function scoreItem(query, item) {
+export function scoreItem(query, item) {
   const base = fuzzyScore(query, item.label);
   if (!item.ticket) return base;
 

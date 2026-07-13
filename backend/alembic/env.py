@@ -13,9 +13,15 @@ from app import models  # noqa: F401 — imported for the side effect of registe
 
 config = context.config
 
+# Default to the app's own DATABASE_URL, but let a caller override it — the
+# migration tests point this at a throwaway database, and a deploy points it at
+# staging. Unconditionally overwriting here made it impossible to target any
+# database except the one in .env.
+#
 # '%' is the config parser's interpolation character, so any %-escape in a
 # URL-encoded password has to be doubled before it goes into the ini layer.
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
+if not config.get_main_option("sqlalchemy.url", None):
+    config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
