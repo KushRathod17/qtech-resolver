@@ -117,6 +117,13 @@ class User(Base):
     # belongs to would be fabricating data. Until it's set, they can't act on
     # the workflow — which is honest rather than broken.
     team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
+
+    # Set when an admin creates the account with a temp password they had to
+    # type themselves — so they know it. Until the person changes it, the API
+    # refuses every route except /auth/me and /users/me/password. A UI-only
+    # gate would be theatre: the token works fine against curl.
+    must_change_password = Column(Boolean, nullable=False, server_default="false")
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     team = relationship("Team", back_populates="members")

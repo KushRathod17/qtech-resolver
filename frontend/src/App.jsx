@@ -13,12 +13,20 @@ import Components from "./pages/Components";
 import Backlog from "./pages/Backlog";
 import Workflow from "./pages/Workflow";
 import People from "./pages/People";
+import ChangePassword from "./pages/ChangePassword";
 import Placeholder from "./pages/Placeholder";
 
 function ProtectedRoute({ children }) {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user } = useAuth();
   if (loading) return <div className="full-page-loading">Loading…</div>;
-  return isAuthenticated ? children : <Navigate to="/login" replace />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+
+  // An admin-created account with a temp password can't use the app until it's
+  // changed — the server refuses every other route anyway, so showing the rest
+  // of the UI would just be a wall of 403s.
+  if (user?.must_change_password) return <ChangePassword />;
+
+  return children;
 }
 
 function AppRoutes() {

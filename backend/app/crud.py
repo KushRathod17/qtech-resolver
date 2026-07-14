@@ -44,6 +44,32 @@ def create_user(db: Session, user_in: schemas.UserCreate, role: models.UserRole)
     return db_user
 
 
+def create_user_by_admin(db: Session, payload: schemas.UserCreateByAdmin) -> models.User:
+    """An admin adds a colleague with a temp password they hand over in person.
+
+    must_change_password is set: the admin typed the password, so they know it,
+    and an account whose owner isn't the only one who can log into it isn't
+    really theirs yet.
+    """
+    user = models.User(
+        email=payload.email,
+        full_name=payload.full_name,
+        hashed_password=hash_password(payload.temp_password),
+        role=payload.role,
+        team_id=payload.team_id,
+        must_change_password=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def clear_must_change_password(db: Session, user: models.User) -> None:
+    user.must_change_password = False
+    db.commit()
+
+
 def set_user_role(db: Session, user: models.User, role: models.UserRole) -> models.User:
     user.role = role
     db.commit()
@@ -61,9 +87,62 @@ def update_user(db: Session, user: models.User, changes: schemas.UserUpdate) -> 
 
 def set_password(db: Session, user: models.User, new_password: str) -> models.User:
     user.hashed_password = hash_password(new_password)
+    # Changing it is exactly what clears the flag — that's the whole gate.
+    user.must_change_password = False
     db.commit()
     db.refresh(user)
     return user
+
+
+# ---------- Workload ----------
+#
+# Bands are on tickets CURRENTLY ASSIGNED AND OPEN — what's on the desk now, not
+# a lifetime tally. Past ~5 concurrent items a person stops being a worker and
+# starts being a queue: context-switching eats the throughput. 0-2 is a genuine
+# "yes, give them another"; 6+ means stop.
+#
+# Fixed rather than relative-to-team-median on purpose: with one or two people
+# per team a median is meaningless and the bands would flicker every time a
+# single ticket moved. One constant, one line to tune.
+WORKLOAD_FREE_MAX = 2
+WORKLOAD_MODERATE_MAX = 5
+
+
+def workload_band(open_tickets: int) -> str:
+    if open_tickets <= WORKLOAD_FREE_MAX:
+        return "free"
+    if open_tickets <= WORKLOAD_MODERATE_MAX:
+        return "moderate"
+    return "busy"
+
+
+def user_workloads(db: Session) -> dict[uuid.UUID, int]:
+    """Open assigned tickets per user, in ONE grouped query.
+
+    A per-user count would be N+1 behind every person-picker, which is exactly
+    where this has to be fast — it's rendered while someone waits to choose.
+    """
+    rows = (
+        db.query(models.Ticket.assignee_id, func.count(models.Ticket.id))
+        .filter(
+            models.Ticket.assignee_id.isnot(None),
+            models.Ticket.status != models.TicketStatus.DONE,
+            # A sub-task is work, but it's counted under its parent — including
+            # both would double-count the same job.
+            models.Ticket.parent_id.is_(None),
+        )
+        .group_by(models.Ticket.assignee_id)
+        .all()
+    )
+    return {user_id: count for user_id, count in rows}
+
+
+def attach_workloads(db: Session, users: list[models.User]) -> list[models.User]:
+    counts = user_workloads(db)
+    for user in users:
+        user.open_tickets = counts.get(user.id, 0)
+        user.band = workload_band(user.open_tickets)
+    return users
 
 
 OPEN_STATUSES = (models.TicketStatus.BACKLOG, models.TicketStatus.TODO)
@@ -429,6 +508,102 @@ def set_user_team(db: Session, user: models.User, team_id: uuid.UUID | None) -> 
     db.commit()
     db.refresh(user)
     return user
+
+
+def user_workflow_profile(db: Session, user: models.User) -> dict:
+    """Everything the profile page shows, derived from ticket_handoffs.
+
+    The trick that avoids a separate tracking table: a handoff row's `action`
+    says WHY the ticket landed on someone. A ticket arriving at Testing via
+    `raised` is a fresh bug to reproduce; the same person receiving the same
+    ticket via `fixed_returned_to_testing` is verifying a fix. Same person, same
+    team, different job — and it's all already in the chain.
+    """
+    holds = (
+        db.query(models.TicketHandoff)
+        .options(
+            joinedload(models.TicketHandoff.to_team),
+            joinedload(models.TicketHandoff.ticket),
+        )
+        .filter(models.TicketHandoff.to_user_id == user.id)
+        .order_by(models.TicketHandoff.sent_at)
+        .all()
+    )
+
+    # Tickets they reported. Covers non-workflow tickets too, which is right:
+    # raising one is still involvement.
+    reported = (
+        db.query(models.Ticket)
+        .filter(models.Ticket.created_by_id == user.id, models.Ticket.parent_id.is_(None))
+        .all()
+    )
+
+    counts = {"raised": len(reported), "tested": 0, "developed": 0, "verified": 0}
+
+    # ticket_id -> {"roles": set, "last": datetime, "ticket": Ticket}
+    touched: dict[uuid.UUID, dict] = {}
+
+    def touch(ticket, role, when):
+        entry = touched.setdefault(
+            ticket.id, {"ticket": ticket, "roles": set(), "last": when}
+        )
+        entry["roles"].add(role)
+        if when > entry["last"]:
+            entry["last"] = when
+
+    for t in reported:
+        touch(t, "reporter", t.created_at)
+
+    for h in holds:
+        if not h.ticket:
+            continue
+        kind = h.to_team.kind if h.to_team else None
+
+        if kind == models.TeamKind.TESTING:
+            if h.action == models.HandoffAction.FIXED_RETURNED_TO_TESTING.value:
+                counts["verified"] += 1
+                role = "verifier"
+            else:
+                counts["tested"] += 1
+                role = "tester"
+        elif kind == models.TeamKind.DEVELOPMENT:
+            counts["developed"] += 1
+            role = "developer"
+        elif kind == models.TeamKind.SUPPORT:
+            role = "support"
+        else:
+            role = "handler"
+
+        touch(h.ticket, role, h.sent_at)
+
+    counts["total_tickets"] = len(touched)
+
+    history = []
+    for entry in touched.values():
+        t = entry["ticket"]
+        is_open = t.status != models.TicketStatus.DONE
+        history.append({
+            "ticket_id": t.id,
+            "key": t.key,
+            "title": t.title,
+            "status": t.status,
+            "roles": sorted(entry["roles"]),
+            "last_involved_at": entry["last"],
+            "is_open": is_open,
+        })
+    history.sort(key=lambda r: r["last_involved_at"], reverse=True)
+
+    open_count = user_workloads(db).get(user.id, 0)
+
+    return {
+        "user": user,
+        "team": user.team,
+        "involvement": counts,
+        "completed": sum(1 for r in history if not r["is_open"]),
+        "still_open": sum(1 for r in history if r["is_open"]),
+        "current_workload": {"open_tickets": open_count, "band": workload_band(open_count)},
+        "history": history,
+    }
 
 
 # ---------- Workflow / handoffs ----------

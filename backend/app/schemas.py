@@ -1,3 +1,4 @@
+import enum
 import uuid
 from datetime import datetime, date
 from typing import Optional
@@ -26,6 +27,40 @@ class UserOut(BaseModel):
     avatar_url: Optional[str] = None
     theme: str = "dark"
     team_id: Optional[uuid.UUID] = None
+    must_change_password: bool = False
+
+
+class UserCreateByAdmin(BaseModel):
+    """An admin/manager adding a colleague directly.
+
+    Unlike self-registration this DOES carry a role and a team — that's the
+    whole point, and it's safe because the endpoint is already role-gated.
+    """
+    email: EmailStr
+    full_name: str = Field(min_length=1, max_length=100)
+    temp_password: str = Field(min_length=8, max_length=72)
+    role: UserRole = UserRole.DEVELOPER
+    team_id: Optional[uuid.UUID] = None
+
+
+# ---------- Workload ----------
+class WorkloadBand(str, enum.Enum):
+    FREE = "free"          # 0-2 open
+    MODERATE = "moderate"  # 3-5 open
+    BUSY = "busy"          # 6+ open
+
+
+class UserWorkload(BaseModel):
+    open_tickets: int
+    band: WorkloadBand
+
+
+class TeamMemberOut(UserOut):
+    """A user as seen in a person-picker: who they are, plus how buried they
+    are. Shown at the moment of assignment, which is the only moment it can
+    change the decision."""
+    open_tickets: int = 0
+    band: WorkloadBand = WorkloadBand.FREE
 
 
 class UserRoleUpdate(BaseModel):
@@ -117,6 +152,42 @@ class TeamOut(BaseModel):
 class UserTeamUpdate(BaseModel):
     # Null removes them from every team.
     team_id: Optional[uuid.UUID] = None
+
+
+# ---------- Workflow profile ----------
+class InvolvementCounts(BaseModel):
+    """What this person actually DID, split by the part they played.
+
+    Derived from ticket_handoffs — a handoff row's `action` says WHY the ticket
+    landed on them, so a tester's first-pass work and their verification work
+    separate without needing a column to remember which was which.
+    """
+    raised: int      # they reported it
+    tested: int      # received a fresh bug to reproduce
+    developed: int   # received a confirmed bug to fix
+    verified: int    # received a fix to check
+    total_tickets: int  # distinct tickets touched in any capacity
+
+
+class ProfileHistoryRow(BaseModel):
+    ticket_id: uuid.UUID
+    key: str
+    title: str
+    status: TicketStatus
+    roles: list[str]              # every hat they wore on this one ticket
+    last_involved_at: datetime
+    is_open: bool
+
+
+class WorkflowProfileOut(BaseModel):
+    user: UserOut
+    team: Optional[TeamOut]
+    involvement: InvolvementCounts
+    completed: int
+    still_open: int
+    # The number that matters for allocation: what is on their desk RIGHT NOW.
+    current_workload: UserWorkload
+    history: list[ProfileHistoryRow]
 
 
 # ---------- Workflow / handoffs ----------

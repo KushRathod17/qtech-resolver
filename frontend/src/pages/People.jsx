@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import { usersApi, teamsApi, errorMessage } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
 import { Avatar } from "../board/constants";
+import WorkloadBadge from "../components/WorkloadBadge";
+import AddPersonModal from "../components/AddPersonModal";
 
 const ROLES = ["admin", "manager", "developer"];
 
@@ -25,6 +27,7 @@ export default function People() {
 
   const [busyId, setBusyId] = useState(null);
   const [savedId, setSavedId] = useState(null); // brief per-row "Saved" flash
+  const [adding, setAdding] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -105,10 +108,17 @@ export default function People() {
     <div className="people-page">
       <div className="page-head">
         <h2>People</h2>
-        <span className="chart-sub">
-          {users.length} {users.length === 1 ? "person" : "people"}
-          {teams.length > 0 && ` · ${teams.length} teams`}
-        </span>
+        <div className="toolbar-right">
+          <span className="chart-sub">
+            {users.length} {users.length === 1 ? "person" : "people"}
+            {teams.length > 0 && ` · ${teams.length} teams`}
+          </span>
+          {canManage && (
+            <button type="button" className="btn-primary" onClick={() => setAdding(true)}>
+              + Add Person
+            </button>
+          )}
+        </div>
       </div>
 
       {error && <div className="banner-error" role="alert">{error}</div>}
@@ -137,6 +147,7 @@ export default function People() {
                 <th scope="col">Email</th>
                 <th scope="col">Team</th>
                 <th scope="col">Role</th>
+                <th scope="col">Workload</th>
                 <th scope="col" className="saved-col" aria-label="Save status" />
               </tr>
             </thead>
@@ -148,11 +159,15 @@ export default function People() {
                 return (
                   <tr key={u.id} className={!u.team_id ? "row-unassigned" : ""}>
                     <td>
-                      <span className="timeline-person">
-                        <Avatar user={u} size={26} />
-                        <strong>{u.full_name}</strong>
-                        {u.id === me?.id && <span className="you-tag">you</span>}
-                      </span>
+                      {/* The name links to their profile — that's where the
+                          full history and involvement breakdown lives. */}
+                      <Link to={`/profile/${u.id}`} className="people-name-link">
+                        <span className="timeline-person">
+                          <Avatar user={u} size={26} />
+                          <strong>{u.full_name}</strong>
+                          {u.id === me?.id && <span className="you-tag">you</span>}
+                        </span>
+                      </Link>
                     </td>
 
                     <td className="settings-row-sub">{u.email}</td>
@@ -201,6 +216,10 @@ export default function People() {
                       )}
                     </td>
 
+                    <td>
+                      <WorkloadBadge band={u.band} openTickets={u.open_tickets ?? 0} />
+                    </td>
+
                     <td className="saved-col">
                       {busy && <span className="saving-flash">Saving…</span>}
                       {!busy && savedId === u.id && (
@@ -217,8 +236,16 @@ export default function People() {
 
       {!canManage && (
         <p className="field-hint">
-          Only admins and managers can change teams. Roles are admin-only.
+          Only admins and managers can add people or change teams. Roles are admin-only.
         </p>
+      )}
+
+      {adding && (
+        <AddPersonModal
+          teams={teams}
+          onCreated={() => load()}   // refetch so their workload/band appear
+          onClose={() => setAdding(false)}
+        />
       )}
     </div>
   );

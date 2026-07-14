@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..dependencies import get_db, get_current_user, require_role
 from ..models import User, UserRole
 from ..schemas import (
-    TeamCreate, TeamUpdate, TeamOut, UserOut,
+    TeamCreate, TeamUpdate, TeamOut, TeamMemberOut,
     TicketWorkflowReport, TeamHoldingTime,
 )
 from .. import crud
@@ -30,16 +30,18 @@ def create_team(
     return crud.create_team(db, payload)
 
 
-@router.get("/{team_id}/members", response_model=list[UserOut])
+@router.get("/{team_id}/members", response_model=list[TeamMemberOut])
 def list_team_members(
     team_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Populates the 'pick a person from that team' dropdown."""
+    """Populates the 'pick a person from that team' dropdown — WITH each
+    candidate's open-ticket count, so the choice is informed at the only moment
+    it can change: while you're making it."""
     if not crud.get_team(db, team_id):
         raise HTTPException(status_code=404, detail="Team not found")
-    return crud.get_team_members(db, team_id)
+    return crud.attach_workloads(db, crud.get_team_members(db, team_id))
 
 
 @router.patch("/{team_id}", response_model=TeamOut)

@@ -8,6 +8,7 @@ import SubtaskList from "./SubtaskList";
 import AttachmentList from "./AttachmentList";
 import CommentComposer, { CommentBody } from "./CommentComposer";
 import HandoffModal from "./HandoffModal";
+import PersonPicker from "./PersonPicker";
 import HandoffTimeline from "./HandoffTimeline";
 import {
   COLUMNS,
@@ -477,43 +478,30 @@ export default function TicketModal({
             <div className="workflow-strip route-strip">
               <span className="workflow-label">Send this to</span>
 
-              <div className="field-row">
-                <div className="field">
-                  <label htmlFor="r-team">Team</label>
-                  <select
-                    id="r-team"
-                    value={routeTeamId}
-                    onChange={(e) => setRouteTeamId(e.target.value)}
-                  >
-                    <option value="">Don't route (board only)</option>
-                    {teams.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="field">
-                  <label htmlFor="r-user">Person</label>
-                  <select
-                    id="r-user"
-                    value={routeUserId}
-                    onChange={(e) => setRouteUserId(e.target.value)}
-                    disabled={!routeTeamId}
-                  >
-                    <option value="">
-                      {routeTeamId ? "Pick a person…" : "Pick a team first"}
-                    </option>
-                    {routeMembers.map((m) => (
-                      <option key={m.id} value={m.id}>{m.full_name}</option>
-                    ))}
-                  </select>
-                </div>
+              <div className="field">
+                <label htmlFor="r-team">Team</label>
+                <select
+                  id="r-team"
+                  value={routeTeamId}
+                  onChange={(e) => setRouteTeamId(e.target.value)}
+                >
+                  <option value="">Don't route (board only)</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
               </div>
 
-              {routeTeamId && routeMembers.length === 0 && (
-                <p className="error-text">
-                  Nobody is on that team yet — assign someone in Settings first.
-                </p>
+              {routeTeamId && (
+                <div className="field">
+                  <label>Person</label>
+                  <PersonPicker
+                    members={routeMembers}
+                    value={routeUserId}
+                    onChange={setRouteUserId}
+                    emptyHint="Nobody is on that team yet — add someone on the People page first."
+                  />
+                </div>
               )}
 
               {routeUserId && (

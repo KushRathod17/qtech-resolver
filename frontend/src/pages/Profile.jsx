@@ -3,13 +3,25 @@ import { useParams, Link } from "react-router-dom";
 
 import { usersApi, errorMessage } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
-import { Avatar, TypeIcon, PriorityIcon, COLUMNS } from "../board/constants";
+import { Avatar, COLUMNS } from "../board/constants";
+import { formatDateTime } from "../board/duration";
+import WorkloadBadge, { BAND_HINT } from "../components/WorkloadBadge";
 
 const STATUS_LABEL = Object.fromEntries(COLUMNS.map((c) => [c.key, c.label]));
 
-function StatTile({ label, value, hint }) {
+// What each hat actually means, so "verifier" isn't a mystery word.
+const ROLE_LABEL = {
+  reporter: "Raised",
+  tester: "Tested",
+  verifier: "Verified fix",
+  developer: "Developed",
+  support: "Handled",
+  handler: "Handled",
+};
+
+function StatTile({ label, value, hint, tone }) {
   return (
-    <div className="stat-tile">
+    <div className={`stat-tile ${tone ? `tone-${tone}` : ""}`}>
       <p className="stat-label">{label}</p>
       <p className="stat-value">{value}</p>
       {hint && <p className="stat-hint">{hint}</p>}
@@ -21,13 +33,10 @@ export default function Profile() {
   const { id } = useParams();
   const { user: me, refreshUser } = useAuth();
 
-  // /profile/me and /profile/:myOwnId are the same page.
   const isMe = id === "me" || id === me?.id;
   const userId = id === "me" ? me?.id : id;
 
   const [profile, setProfile] = useState(null);
-  const [stats, setStats] = useState(null);
-  const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -36,14 +45,7 @@ export default function Profile() {
     setLoading(true);
     try {
       setError("");
-      const [p, s, t] = await Promise.all([
-        usersApi.profile(userId),
-        usersApi.stats(userId),
-        usersApi.tickets(userId),
-      ]);
-      setProfile(p);
-      setStats(s);
-      setTickets(t);
+      setProfile(await usersApi.workflowProfile(userId));
     } catch (err) {
       setError(errorMessage(err, "Couldn't load that profile."));
     } finally {
@@ -59,62 +61,111 @@ export default function Profile() {
   if (error) return <div className="profile-page"><div className="banner-error">{error}</div></div>;
   if (!profile) return null;
 
-  const openTickets = tickets.filter((t) => t.status !== "done");
+  const { user, team, involvement, completed, still_open: stillOpen, current_workload: load_, history } =
+    profile;
 
   return (
     <div className="profile-page">
       <header className="profile-head">
-        <Avatar user={profile} size={72} />
+        <Avatar user={user} size={72} />
         <div className="profile-identity">
-          <h2>{profile.full_name}</h2>
-          <p className="profile-email">{profile.email}</p>
-          <span className={`state-pill role-${profile.role}`}>{profile.role}</span>
+          <h2>{user.full_name}</h2>
+          <p className="profile-email">{user.email}</p>
+          <div className="profile-tags">
+            {team ? (
+              <span
+                className="component-chip"
+                style={{ borderColor: team.color, color: team.color }}
+                title={team.description || team.name}
+              >
+                {team.name}
+              </span>
+            ) : (
+              <span className="state-pill unassigned-pill">No team</span>
+            )}
+            <span className={`state-pill role-${user.role}`}>{user.role}</span>
+          </div>
+        </div>
+
+        {/* The allocation number, given the most prominent slot on the page. */}
+        <div className="profile-workload">
+          <p className="stat-label">On their desk now</p>
+          <div className="profile-workload-value">
+            <WorkloadBadge band={load_.band} openTickets={load_.open_tickets} />
+          </div>
+          <p className="stat-hint">{BAND_HINT[load_.band]}</p>
         </div>
       </header>
 
-      {stats && (
-        <div className="stat-row">
-          <StatTile label="Open" value={stats.open} hint="backlog + to do" />
-          <StatTile label="In progress" value={stats.in_progress} hint="in progress + review" />
-          <StatTile label="Done" value={stats.done} />
-          <StatTile
-            label="Current load"
-            value={stats.story_points_open}
-            hint="unfinished story points"
-          />
-        </div>
-      )}
-
-      <div className="profile-grid">
-        <section className="settings-panel">
-          <div className="settings-panel-head">
-            <h3>Assigned tickets</h3>
-            <p className="chart-sub">
-              {openTickets.length} still open of {tickets.length} total.
-            </p>
-          </div>
-
-          {tickets.length === 0 ? (
-            <p className="empty-state">Nothing assigned.</p>
-          ) : (
-            <ul className="settings-list">
-              {tickets.map((t) => (
-                <li key={t.id} className="settings-row">
-                  <TypeIcon type={t.ticket_type} />
-                  <Link to={`/board?ticket=${t.id}`} className="profile-ticket">
-                    <span className="ticket-id">{t.key}</span>
-                    <span className="profile-ticket-title">{t.title}</span>
-                  </Link>
-                  <PriorityIcon priority={t.priority} />
-                  <span className="state-pill">{STATUS_LABEL[t.status] || t.status}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {isMe && <EditProfilePanel profile={profile} onSaved={(p) => { setProfile(p); refreshUser?.(); }} />}
+      <div className="stat-row">
+        <StatTile label="Raised" value={involvement.raised} hint="reported by them" />
+        <StatTile label="Tested" value={involvement.tested} hint="bugs reproduced" />
+        <StatTile label="Developed" value={involvement.developed} hint="fixes written" />
+        <StatTile label="Verified" value={involvement.verified} hint="fixes checked" />
+        <StatTile
+          label="Tickets touched"
+          value={involvement.total_tickets}
+          hint={`${completed} done · ${stillOpen} open`}
+        />
       </div>
+
+      <section className="settings-panel">
+        <div className="settings-panel-head">
+          <h3>Past tickets</h3>
+          <p className="chart-sub">
+            Every ticket they were involved in, and what they did on it. Derived from the handoff
+            chain — a person can wear more than one hat on the same ticket.
+          </p>
+        </div>
+
+        {history.length === 0 ? (
+          <p className="empty-state">
+            {isMe ? "You haven't" : `${user.full_name} hasn't`} been involved in any tickets yet.
+          </p>
+        ) : (
+          <div className="timeline-scroll">
+            <table className="chart-table">
+              <thead>
+                <tr>
+                  <th scope="col">Ticket</th>
+                  <th scope="col">Their part</th>
+                  <th scope="col">Last involved</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((h) => (
+                  <tr key={h.ticket_id} className={h.is_open ? "" : "row-done"}>
+                    <td>
+                      <Link to={`/board?ticket=${h.ticket_id}`} className="profile-ticket">
+                        <span className="ticket-id">{h.key}</span>
+                        <span className="profile-ticket-title">{h.title}</span>
+                      </Link>
+                    </td>
+                    <td>
+                      <span className="role-hats">
+                        {h.roles.map((r) => (
+                          <span key={r} className={`action-pill hat-${r}`}>
+                            {ROLE_LABEL[r] || r}
+                          </span>
+                        ))}
+                      </span>
+                    </td>
+                    <td>{formatDateTime(h.last_involved_at)}</td>
+                    <td>
+                      <span className={`state-pill ${h.is_open ? "" : "state-completed"}`}>
+                        {STATUS_LABEL[h.status] || h.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {isMe && <EditProfilePanel profile={user} onSaved={() => { load(); refreshUser?.(); }} />}
     </div>
   );
 }
@@ -143,7 +194,8 @@ function EditProfilePanel({ profile, onSaved }) {
     setSavingName(true);
     setError("");
     try {
-      onSaved(await usersApi.updateMe({ full_name: fullName.trim() }));
+      await usersApi.updateMe({ full_name: fullName.trim() });
+      onSaved();
       flash("Name updated.");
     } catch (err) {
       setError(errorMessage(err, "Couldn't save your name."));
@@ -158,7 +210,8 @@ function EditProfilePanel({ profile, onSaved }) {
     setUploading(true);
     setError("");
     try {
-      onSaved(await usersApi.uploadAvatar(file));
+      await usersApi.uploadAvatar(file);
+      onSaved();
       flash("Avatar updated.");
     } catch (err) {
       setError(errorMessage(err, "Couldn't upload that image."));
@@ -171,7 +224,8 @@ function EditProfilePanel({ profile, onSaved }) {
   async function removeAvatar() {
     setUploading(true);
     try {
-      onSaved(await usersApi.updateMe({ avatar_url: null }));
+      await usersApi.updateMe({ avatar_url: null });
+      onSaved();
       flash("Back to initials.");
     } catch (err) {
       setError(errorMessage(err, "Couldn't remove your avatar."));
@@ -183,14 +237,9 @@ function EditProfilePanel({ profile, onSaved }) {
   async function changePassword(e) {
     e.preventDefault();
     setError("");
-    if (newPw.length < 8) {
-      setError("New password must be at least 8 characters.");
-      return;
-    }
-    if (newPw !== confirmPw) {
-      setError("Those passwords don't match.");
-      return;
-    }
+    if (newPw.length < 8) return setError("New password must be at least 8 characters.");
+    if (newPw !== confirmPw) return setError("Those passwords don't match.");
+
     setSavingPw(true);
     try {
       await usersApi.changePassword(currentPw, newPw);
@@ -208,7 +257,7 @@ function EditProfilePanel({ profile, onSaved }) {
   return (
     <section className="settings-panel">
       <div className="settings-panel-head">
-        <h3>Edit profile</h3>
+        <h3>Edit your profile</h3>
       </div>
 
       {error && <div className="banner-error" role="alert">{error}</div>}
@@ -217,14 +266,8 @@ function EditProfilePanel({ profile, onSaved }) {
       <div className="avatar-edit">
         <Avatar user={profile} size={56} />
         <div className="avatar-edit-actions">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            onChange={uploadAvatar}
-            disabled={uploading}
-            aria-label="Upload avatar"
-          />
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif"
+                 onChange={uploadAvatar} disabled={uploading} aria-label="Upload avatar" />
           {profile.avatar_url && (
             <button type="button" className="btn-ghost" onClick={removeAvatar} disabled={uploading}>
               Use initials instead
@@ -248,37 +291,20 @@ function EditProfilePanel({ profile, onSaved }) {
         <h4>Change password</h4>
         <div className="field">
           <label htmlFor="p-cur">Current password</label>
-          <input
-            id="p-cur"
-            type="password"
-            value={currentPw}
-            onChange={(e) => setCurrentPw(e.target.value)}
-            autoComplete="current-password"
-            required
-          />
+          <input id="p-cur" type="password" value={currentPw}
+                 onChange={(e) => setCurrentPw(e.target.value)}
+                 autoComplete="current-password" required />
         </div>
         <div className="field">
           <label htmlFor="p-new">New password</label>
-          <input
-            id="p-new"
-            type="password"
-            value={newPw}
-            onChange={(e) => setNewPw(e.target.value)}
-            autoComplete="new-password"
-            minLength={8}
-            required
-          />
+          <input id="p-new" type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)}
+                 autoComplete="new-password" minLength={8} required />
         </div>
         <div className="field">
           <label htmlFor="p-conf">Confirm new password</label>
-          <input
-            id="p-conf"
-            type="password"
-            value={confirmPw}
-            onChange={(e) => setConfirmPw(e.target.value)}
-            autoComplete="new-password"
-            required
-          />
+          <input id="p-conf" type="password" value={confirmPw}
+                 onChange={(e) => setConfirmPw(e.target.value)}
+                 autoComplete="new-password" required />
         </div>
         <button type="submit" className="btn-primary" disabled={savingPw}>
           {savingPw ? "Changing…" : "Change password"}

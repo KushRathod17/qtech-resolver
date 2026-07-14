@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 
 import { teamsApi, workflowApi, errorMessage } from "../api/resources";
-import { Avatar } from "../board/constants";
+import PersonPicker from "./PersonPicker";
 
 /**
  * Perform one workflow action.
@@ -82,35 +82,16 @@ export default function HandoffModal({ ticket, action, onDone, onClose }) {
 
           {needsPerson ? (
             <div className="field">
-              <label htmlFor="h-user">
-                Who on {action.target_team.name}?
-              </label>
+              <label>Who on {action.target_team.name}?</label>
               {loading ? (
                 <p className="empty-state">Loading team…</p>
-              ) : members.length === 0 ? (
-                <p className="error-text">
-                  Nobody is on {action.target_team.name} yet. Assign someone in Settings first.
-                </p>
               ) : (
-                <select
-                  id="h-user"
+                <PersonPicker
+                  members={members}
                   value={toUserId}
-                  onChange={(e) => setToUserId(e.target.value)}
-                  required
-                >
-                  <option value="">Pick a person…</option>
-                  {members.map((m) => (
-                    <option key={m.id} value={m.id}>{m.full_name}</option>
-                  ))}
-                </select>
-              )}
-
-              {/* Show the face once chosen — a name in a dropdown is easy to misread. */}
-              {toUserId && (
-                <div className="handoff-target">
-                  <Avatar user={members.find((m) => m.id === toUserId)} size={24} />
-                  <span>{members.find((m) => m.id === toUserId)?.full_name}</span>
-                </div>
+                  onChange={setToUserId}
+                  emptyHint={`Nobody is on ${action.target_team.name} yet. Add someone on the People page first.`}
+                />
               )}
             </div>
           ) : (

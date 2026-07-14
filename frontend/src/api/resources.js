@@ -111,8 +111,14 @@ export const usersApi = {
   setTeam: (id, teamId) =>
     apiClient.patch(`/users/${id}/team`, { team_id: teamId || null }).then((r) => r.data),
 
+  // Admin/manager adds a colleague directly. The account can log in at once,
+  // but must change the temp password before anything else works.
+  create: (payload) => apiClient.post("/users/", payload).then((r) => r.data),
+
   me: () => apiClient.get("/users/me").then((r) => r.data),
   profile: (id) => apiClient.get(`/users/${id}`).then((r) => r.data),
+  workflowProfile: (id) =>
+    apiClient.get(`/users/${id}/workflow-profile`).then((r) => r.data),
   stats: (id) => apiClient.get(`/users/${id}/stats`).then((r) => r.data),
   tickets: (id) => apiClient.get(`/users/${id}/tickets`).then((r) => r.data),
 
