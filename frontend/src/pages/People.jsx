@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 
 import { usersApi, teamsApi, errorMessage } from "../api/resources";
@@ -28,6 +28,7 @@ export default function People() {
   const [busyId, setBusyId] = useState(null);
   const [savedId, setSavedId] = useState(null); // brief per-row "Saved" flash
   const [adding, setAdding] = useState(false);
+  const [search, setSearch] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -100,6 +101,17 @@ export default function People() {
   const teamOf = (u) => teams.find((t) => t.id === u.team_id) || null;
   const unassigned = users.filter((u) => !u.team_id).length;
 
+  // Everyone who registers lands in this table on their own — the job here is
+  // FINDING them (usually by the email they signed up with), not adding them.
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(
+      (u) =>
+        u.email.toLowerCase().includes(q) || u.full_name.toLowerCase().includes(q)
+    );
+  }, [users, search]);
+
   if (loading) {
     return <div className="people-page"><p className="empty-state">Loading people…</p></div>;
   }
@@ -109,17 +121,35 @@ export default function People() {
       <div className="page-head">
         <h2>People</h2>
         <div className="toolbar-right">
+          <input
+            className="search-input"
+            type="search"
+            placeholder="Find by email or name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Find a person by email or name"
+          />
           <span className="chart-sub">
-            {users.length} {users.length === 1 ? "person" : "people"}
+            {search ? `${visible.length} of ${users.length}` : `${users.length} people`}
             {teams.length > 0 && ` · ${teams.length} teams`}
           </span>
           {canManage && (
-            <button type="button" className="btn-primary" onClick={() => setAdding(true)}>
-              + Add Person
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setAdding(true)}
+              title="For someone who has never signed up. Anyone who registers appears here automatically."
+            >
+              + Create new account
             </button>
           )}
         </div>
       </div>
+
+      <p className="settings-link-note">
+        Everyone who signs up appears here automatically — find them by email above and set their
+        team. <strong>Create new account</strong> is only for someone who has never registered.
+      </p>
 
       {error && <div className="banner-error" role="alert">{error}</div>}
 
@@ -152,7 +182,7 @@ export default function People() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => {
+              {visible.map((u) => {
                 const team = teamOf(u);
                 const busy = busyId === u.id;
 
@@ -231,6 +261,13 @@ export default function People() {
               })}
             </tbody>
           </table>
+
+          {visible.length === 0 && (
+            <p className="empty-state">
+              Nobody matches “{search}”. If they've never signed up, use{" "}
+              <strong>Create new account</strong>.
+            </p>
+          )}
         </div>
       </section>
 
