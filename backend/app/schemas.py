@@ -576,6 +576,30 @@ class CommentOut(BaseModel):
     created_at: datetime
 
 
+# ---------- Notifications ----------
+class NotificationTicketRef(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    key: str
+    title: str
+
+
+class NotificationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    kind: str
+    title: str
+    body: Optional[str]
+    ticket: Optional[NotificationTicketRef]
+    actor: Optional[UserOut]
+    is_read: bool
+    created_at: datetime
+
+
+class UnreadCount(BaseModel):
+    unread: int
+
+
 # ---------- Activity ----------
 class ActivityLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)

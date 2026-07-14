@@ -4,6 +4,7 @@ import { Outlet, Link } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import CommandPalette from "./CommandPalette";
 import ShortcutsHelp from "./ShortcutsHelp";
+import NotificationBell from "./NotificationBell";
 import { useAuth } from "../context/AuthContext";
 import { usersApi } from "../api/resources";
 import { Avatar } from "../board/constants";
@@ -60,6 +61,7 @@ export default function AppLayout() {
             >
               {theme === "dark" ? "☀" : "☾"}
             </button>
+            <NotificationBell />
             <span className="kbd-hint" title="Open the command palette">
               <kbd>Ctrl</kbd><kbd>K</kbd>
             </span>

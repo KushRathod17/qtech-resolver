@@ -3109,3 +3109,130 @@ body { background: var(--color-bg); color: var(--color-text); }
   background: rgba(229, 72, 77, 0.12);
   font-weight: 700;
 }
+
+/* ==========================================================================
+   Notifications
+   ========================================================================== */
+.notif-wrap { position: relative; }
+
+.notif-bell {
+  position: relative;
+  background: transparent;
+  border: none;
+  font-size: 17px;
+  line-height: 1;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-dim);
+}
+.notif-bell:hover { background: var(--color-panel-alt); }
+
+.notif-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--priority-urgent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Sit above the topbar without shifting the bell. */
+  box-shadow: 0 0 0 2px var(--color-panel);
+}
+
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 1100;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.notif-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13.5px;
+}
+
+.notif-list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 14px;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  background: transparent;
+  text-align: left;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: var(--color-panel-alt); }
+
+/* Unread: a left accent bar and a faint wash, so the eye finds them first. */
+.notif-item.unread {
+  background: rgba(62, 123, 250, 0.06);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.notif-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-panel-alt);
+  font-size: 11px;
+  color: var(--color-text-dim);
+  margin-top: 1px;
+}
+
+.notif-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notif-title {
+  font-size: 13px;
+  color: var(--color-text);
+  line-height: 1.35;
+}
+
+.notif-body {
+  font-size: 12px;
+  color: var(--color-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notif-time {
+  font-size: 11px;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+}

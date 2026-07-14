@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .routers import (
     auth, tickets, comments, users, labels, sprints, components, filters, teams,
-    files,
+    files, notifications,
 )
 
 # Schema is owned by Alembic now, not create_all(). create_all only ever ADDS
@@ -43,6 +43,7 @@ app.include_router(components.sla_router)
 app.include_router(filters.router)
 app.include_router(teams.router)
 app.include_router(teams.reports_router)
+app.include_router(notifications.router)
 
 
 @app.get("/health")

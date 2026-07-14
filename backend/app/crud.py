@@ -759,6 +759,23 @@ def perform_handoff(
         detail = f"{spec.label} — {target_user.full_name}"
     log_activity(db, ticket.id, actor.id, "handoff", detail)
 
+    # The person it just landed on gets a pointed "it's yours now". Watchers get
+    # told it moved. The actor gets neither — they did it. The new assignee is
+    # excluded from the watcher fan-out so they get ONE notification, the pointed
+    # one, not also the generic "it moved".
+    assigned_ids = set()
+    if target_user and target_user.id != actor.id:
+        _notify(db, target_user.id, actor.id, "assigned",
+                f"{actor.full_name} handed you {ticket.key}", ticket,
+                body=spec.label + (f" — {payload.note}" if payload.note else ""))
+        assigned_ids.add(target_user.id)
+
+    notify_ticket_watchers(
+        db, ticket, actor.id, "handoff",
+        f"{ticket.key} — {spec.label} by {actor.full_name}",
+        exclude=assigned_ids,
+    )
+
     db.commit()
     db.refresh(ticket)
     attach_derived(db, [ticket])
@@ -784,6 +801,12 @@ def raise_into_workflow(
     ticket.assignee_id = to_user.id
 
     log_activity(db, ticket.id, actor.id, "handoff", f"Raised → {to_user.full_name}")
+
+    if to_user.id != actor.id:
+        _notify(db, to_user.id, actor.id, "assigned",
+                f"{actor.full_name} raised {ticket.key} to you", ticket,
+                body=note or ticket.title)
+
     db.commit()
     db.refresh(ticket)
     return ticket
@@ -1236,6 +1259,15 @@ def update_ticket(
             log_activity(db, ticket.id, actor_id, "labels_changed",
                          ", ".join(sorted(after)) or "Labels cleared")
 
+    # Assigning someone directly from the edit form (not via a workflow handoff)
+    # should still tell them. Only on an actual change, and never to yourself.
+    new_assignee = update_data.get("assignee_id")
+    if "assignee_id" in update_data and new_assignee and new_assignee != actor_id:
+        actor = get_user(db, actor_id)
+        _notify(db, new_assignee, actor_id, "assigned",
+                f"{actor.full_name if actor else 'Someone'} assigned you {ticket.key}",
+                ticket, body=ticket.title)
+
     db.commit()
     db.refresh(ticket)
     attach_sla(db, [ticket])
@@ -1459,6 +1491,80 @@ def delete_ticket(db: Session, ticket: models.Ticket) -> None:
     db.commit()
 
 
+# ---------- Notifications ----------
+def _notify(db: Session, user_id, actor_id, kind, title, ticket, body=None):
+    """Stage ONE notification row. The caller commits, so the notification lands
+    in the same transaction as the thing it announces (or neither does)."""
+    db.add(models.Notification(
+        user_id=user_id,
+        actor_id=actor_id,
+        kind=kind,
+        title=title,
+        body=body,
+        ticket_id=ticket.id if ticket else None,
+    ))
+
+
+def notify_ticket_watchers(db, ticket, actor_id, kind, title, body=None, exclude=()):
+    """Fan out to everyone who cares about this ticket, in ONE place so no event
+    site has to reason about the recipient set.
+
+    Recipients = watchers ∪ current assignee, minus the actor (nobody wants to be
+    told about the thing they just did) and minus `exclude` (anyone who already
+    got a more specific notification about the same event — a mention or a direct
+    assignment outranks the generic "something happened"). De-duped.
+    """
+    recipients = {w.id for w in ticket.watchers}
+    if ticket.assignee_id:
+        recipients.add(ticket.assignee_id)
+    recipients.discard(actor_id)
+    recipients.difference_update(exclude)
+
+    for user_id in recipients:
+        _notify(db, user_id, actor_id, kind, title, ticket, body)
+
+
+def get_notifications(db: Session, user_id: uuid.UUID, limit: int = 30) -> list[models.Notification]:
+    return (
+        db.query(models.Notification)
+        .options(
+            joinedload(models.Notification.actor),
+            joinedload(models.Notification.ticket),
+        )
+        .filter(models.Notification.user_id == user_id)
+        .order_by(models.Notification.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def count_unread(db: Session, user_id: uuid.UUID) -> int:
+    return (
+        db.query(models.Notification)
+        .filter(models.Notification.user_id == user_id, models.Notification.is_read.is_(False))
+        .count()
+    )
+
+
+def mark_notification_read(db: Session, notification: models.Notification) -> None:
+    notification.is_read = True
+    db.commit()
+
+
+def mark_all_read(db: Session, user_id: uuid.UUID) -> int:
+    n = (
+        db.query(models.Notification)
+        .filter(models.Notification.user_id == user_id, models.Notification.is_read.is_(False))
+        .update({models.Notification.is_read: True})
+    )
+    db.commit()
+    return n
+
+
+def get_notification(db: Session, notification_id: uuid.UUID) -> models.Notification | None:
+    return db.query(models.Notification).filter(models.Notification.id == notification_id).first()
+
+
 # ---------- Watchers ----------
 def watch_ticket(db: Session, ticket: models.Ticket, user: models.User) -> models.Ticket:
     if user not in ticket.watchers:
@@ -1567,8 +1673,13 @@ def create_comment(
     db.add(db_comment)
     log_activity(db, ticket_id, author_id, "commented", comment_in.body[:80])
 
+    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
+    author = get_user(db, author_id)
+    author_name = author.full_name if author else "Someone"
+    excerpt = comment_in.body[:120]
+
+    mentioned_ids = set()
     if comment_in.mention_user_ids:
-        ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
         mentioned = (
             db.query(models.User)
             .filter(models.User.id.in_(comment_in.mention_user_ids))
@@ -1580,6 +1691,26 @@ def create_comment(
             if ticket and user not in ticket.watchers:
                 ticket.watchers.append(user)
             log_activity(db, ticket_id, author_id, "mentioned", user.full_name)
+            mentioned_ids.add(user.id)
+
+    if ticket:
+        # A mention is a direct "you specifically" — it outranks the generic
+        # "someone commented on a ticket you watch", so a mentioned person gets
+        # ONE notification, the pointed one, not both. notify_ticket_watchers
+        # already skips the author and dedupes, so we exclude the mentioned set
+        # from the watcher fan-out and notify them separately.
+        for uid in mentioned_ids - {author_id}:
+            _notify(db, uid, author_id, "mentioned",
+                    f"{author_name} mentioned you on {ticket.key}", ticket, excerpt)
+
+        watcher_recipients = {w.id for w in ticket.watchers}
+        if ticket.assignee_id:
+            watcher_recipients.add(ticket.assignee_id)
+        watcher_recipients -= mentioned_ids
+        watcher_recipients.discard(author_id)
+        for uid in watcher_recipients:
+            _notify(db, uid, author_id, "commented",
+                    f"{author_name} commented on {ticket.key}", ticket, excerpt)
 
     db.commit()
     db.refresh(db_comment)

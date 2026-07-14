@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Column, String, Text, DateTime, Date, ForeignKey, Integer, Float,
-    Boolean, JSON, Table, Sequence, Enum as SAEnum
+    Boolean, JSON, Index, Table, Sequence, Enum as SAEnum
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship, backref
@@ -377,6 +377,44 @@ class Attachment(Base):
     @property
     def url(self) -> str:
         return f"/uploads/attachments/{self.stored_name}"
+
+
+class Notification(Base):
+    """One thing that happened that a specific person should know about.
+
+    Deliberately denormalised: title and body are rendered at creation time and
+    stored, rather than re-derived on read. A notification is a snapshot of "what
+    was true when this happened" — if the ticket is later retitled, the
+    notification should still say what it said. ticket_id is only for the link.
+    """
+    __tablename__ = "notifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    kind = Column(String, nullable=False)   # assigned | mentioned | commented | handoff | resolved
+    title = Column(String, nullable=False)
+    body = Column(Text, nullable=True)
+
+    # Where clicking it goes. Nullable + SET NULL so deleting a ticket doesn't
+    # delete the history that you were once notified about it.
+    ticket_id = Column(UUID(as_uuid=True), ForeignKey("tickets.id", ondelete="SET NULL"),
+                       nullable=True)
+    # Who caused it. SET NULL so a departing colleague's notifications survive.
+    actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+                      nullable=True)
+
+    is_read = Column(Boolean, nullable=False, server_default="false")
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    ticket = relationship("Ticket", foreign_keys=[ticket_id])
+    actor = relationship("User", foreign_keys=[actor_id])
+
+    # The unread badge is COUNT(*) WHERE user_id=? AND is_read=false, on every
+    # poll — this composite index is what keeps that cheap at scale.
+    __table_args__ = (
+        Index("ix_notifications_user_unread", "user_id", "is_read"),
+    )
 
 
 class Comment(Base):

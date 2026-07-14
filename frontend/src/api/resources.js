@@ -39,6 +39,13 @@ export const ticketsApi = {
     apiClient.delete(`/tickets/${ticketId}/attachments/${attachmentId}`),
 };
 
+export const notificationsApi = {
+  list: () => apiClient.get("/notifications/").then((r) => r.data),
+  unreadCount: () => apiClient.get("/notifications/unread-count").then((r) => r.data.unread),
+  markRead: (id) => apiClient.post(`/notifications/${id}/read`),
+  markAllRead: () => apiClient.post("/notifications/read-all").then((r) => r.data),
+};
+
 export const filtersApi = {
   list: () => apiClient.get("/filters/").then((r) => r.data),
   create: (payload) => apiClient.post("/filters/", payload).then((r) => r.data),
