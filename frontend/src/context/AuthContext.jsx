@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import apiClient from "../api/client";
+import { clearFileCache } from "../api/files";
 
 const AuthContext = createContext(null);
 
@@ -56,6 +57,10 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    // Avatars and attachments are held as blob: URLs fetched with the old
+    // token. Drop them rather than leaving one user's files in memory for the
+    // next person to sign in on this machine.
+    clearFileCache();
     localStorage.removeItem("access_token");
     setToken(null);
     setUser(null);

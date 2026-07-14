@@ -1,3 +1,5 @@
+import { useFileUrl } from "../api/files";
+
 /** Shared board vocabulary: columns, and how each enum renders. */
 
 export const COLUMNS = [
@@ -88,10 +90,12 @@ export function avatarColor(id = "") {
 // Avatar images are served by the API, not the Vite dev server.
 export const API_ORIGIN = "http://127.0.0.1:8000";
 
-export const avatarSrc = (user) =>
-  user?.avatar_url ? `${API_ORIGIN}${user.avatar_url}` : null;
-
 export function Avatar({ user, size = 24, title }) {
+  // /uploads requires a token now, so the image is fetched with one and turned
+  // into a blob: URL. A plain <img src> would just get a 401 — the browser has
+  // no way to attach the Authorization header.
+  const src = useFileUrl(user?.avatar_url || null);
+
   if (!user) {
     return (
       <div className="avatar avatar-empty" style={{ width: size, height: size }} title={title || "Unassigned"}>
@@ -100,7 +104,6 @@ export function Avatar({ user, size = 24, title }) {
     );
   }
 
-  const src = avatarSrc(user);
   if (src) {
     return (
       <img
@@ -113,6 +116,8 @@ export function Avatar({ user, size = 24, title }) {
     );
   }
 
+  // Also the graceful fallback while the blob is still loading, or if it fails:
+  // initials are never wrong, just less personal.
   return (
     <div
       className="avatar"

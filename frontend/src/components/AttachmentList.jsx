@@ -1,8 +1,9 @@
 import { useState, useRef } from "react";
 
 import { ticketsApi, errorMessage } from "../api/resources";
+import { useFileUrl, downloadFile } from "../api/files";
 import { useAuth } from "../context/AuthContext";
-import { API_ORIGIN, Avatar } from "../board/constants";
+import { Avatar } from "../board/constants";
 
 const MAX_MB = 10;
 
@@ -13,6 +14,52 @@ function humanSize(bytes) {
 }
 
 const isImage = (type) => type.startsWith("image/");
+
+/** One row. Split out so each attachment can resolve its own authenticated URL. */
+function AttachmentRow({ attachment, canDelete, busy, onDelete, onError }) {
+  // Only images need a blob URL up front — everything else is fetched on click.
+  const thumb = useFileUrl(isImage(attachment.content_type) ? attachment.url : null);
+
+  async function download(e) {
+    e.preventDefault();
+    try {
+      await downloadFile(attachment.url, attachment.filename);
+    } catch {
+      onError("Couldn't download that file.");
+    }
+  }
+
+  return (
+    <li className="attachment-row">
+      {isImage(attachment.content_type) && thumb ? (
+        <img className="attachment-thumb" src={thumb} alt="" />
+      ) : (
+        <span className="attachment-icon" aria-hidden="true">📎</span>
+      )}
+
+      {/* A real link (right-click, middle-click) that downloads through the
+          token rather than hitting an endpoint the browser can't authenticate. */}
+      <a className="attachment-name" href={attachment.url} onClick={download}>
+        {attachment.filename}
+      </a>
+
+      <span className="attachment-meta">{humanSize(attachment.size_bytes)}</span>
+      <Avatar user={attachment.uploaded_by} size={18} />
+
+      {canDelete && (
+        <button
+          type="button"
+          className="btn-ghost subtask-x"
+          onClick={() => onDelete(attachment)}
+          disabled={busy}
+          aria-label={`Delete ${attachment.filename}`}
+        >
+          ✕
+        </button>
+      )}
+    </li>
+  );
+}
 
 export default function AttachmentList({ ticket, onChanged }) {
   const { user } = useAuth();
@@ -76,43 +123,16 @@ export default function AttachmentList({ ticket, onChanged }) {
       {items.length === 0 && <p className="empty-state">Nothing attached.</p>}
 
       <ul className="attachment-list">
-        {items.map((a) => {
-          const canDelete = privileged || a.uploaded_by?.id === user?.id;
-          return (
-            <li key={a.id} className="attachment-row">
-              {isImage(a.content_type) ? (
-                <img className="attachment-thumb" src={`${API_ORIGIN}${a.url}`} alt="" />
-              ) : (
-                <span className="attachment-icon" aria-hidden="true">📎</span>
-              )}
-
-              <a
-                className="attachment-name"
-                href={`${API_ORIGIN}${a.url}`}
-                target="_blank"
-                rel="noreferrer"
-                download={a.filename}
-              >
-                {a.filename}
-              </a>
-
-              <span className="attachment-meta">{humanSize(a.size_bytes)}</span>
-              <Avatar user={a.uploaded_by} size={18} />
-
-              {canDelete && (
-                <button
-                  type="button"
-                  className="btn-ghost subtask-x"
-                  onClick={() => remove(a)}
-                  disabled={busyId === a.id}
-                  aria-label={`Delete ${a.filename}`}
-                >
-                  ✕
-                </button>
-              )}
-            </li>
-          );
-        })}
+        {items.map((a) => (
+          <AttachmentRow
+            key={a.id}
+            attachment={a}
+            canDelete={privileged || a.uploaded_by?.id === user?.id}
+            busy={busyId === a.id}
+            onDelete={remove}
+            onError={setError}
+          />
+        ))}
       </ul>
 
       <div className="attachment-upload">

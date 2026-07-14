@@ -1505,6 +1505,16 @@ def get_attachment(db: Session, attachment_id: uuid.UUID) -> models.Attachment |
     return db.query(models.Attachment).filter(models.Attachment.id == attachment_id).first()
 
 
+def get_attachment_by_stored_name(db: Session, stored_name: str) -> models.Attachment | None:
+    """Used when serving the file: the URL carries the stored name, and we need
+    the row to recover the original filename and content type."""
+    return (
+        db.query(models.Attachment)
+        .filter(models.Attachment.stored_name == stored_name)
+        .first()
+    )
+
+
 def delete_attachment(db: Session, attachment: models.Attachment) -> None:
     db.delete(attachment)
     db.commit()
