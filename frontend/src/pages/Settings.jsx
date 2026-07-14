@@ -85,36 +85,39 @@ function LabelsPanel({ canManage }) {
       <div className="settings-panel-head">
         <h3>Labels</h3>
         <p className="chart-sub">
+          Anyone can create a label — here, or by typing a new name straight into the ticket form.
           {canManage
-            ? "Create, rename, recolour, or remove the labels tickets can carry."
-            : "Only admins and managers can change labels."}
+            ? " Renaming and deleting are admin/manager only, because they rewrite every ticket already carrying the label."
+            : " Renaming and deleting are admin/manager only."}
         </p>
       </div>
 
       {error && <div className="banner-error" role="alert">{error}</div>}
 
-      {canManage && (
-        <form className="label-create" onSubmit={handleCreate}>
-          <input
-            type="color"
-            className="color-swatch-input"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-            aria-label="Label colour"
-          />
-          <input
-            className="search-input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="New label name"
-            maxLength={40}
-            aria-label="New label name"
-          />
-          <button type="submit" className="btn-primary" disabled={creating || !name.trim()}>
-            {creating ? "Adding…" : "Add label"}
-          </button>
-        </form>
-      )}
+      {/* Creating a label is open to everyone — a support engineer triaging a
+          live escalation shouldn't have to file a request to get
+          "OTRAMS-Booking" added. The backend has always allowed this; the form
+          was hidden here by mistake, and the copy above claimed otherwise. */}
+      <form className="label-create" onSubmit={handleCreate}>
+        <input
+          type="color"
+          className="color-swatch-input"
+          value={color}
+          onChange={(e) => setColor(e.target.value)}
+          aria-label="Label colour"
+        />
+        <input
+          className="search-input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="New label name"
+          maxLength={40}
+          aria-label="New label name"
+        />
+        <button type="submit" className="btn-primary" disabled={creating || !name.trim()}>
+          {creating ? "Adding…" : "Add label"}
+        </button>
+      </form>
 
       {loading ? (
         <p className="empty-state">Loading labels…</p>
