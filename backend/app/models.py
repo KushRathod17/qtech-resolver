@@ -82,6 +82,7 @@ class HandoffAction(str, enum.Enum):
     VERIFIED_RETURNED_TO_REPORTER = "verified_returned_to_reporter"  # testing -> reporter
     RETURNED_STILL_BROKEN = "returned_still_broken"        # testing -> development
     RESOLVED = "resolved"                                  # reporter closes it
+    REOPENED = "reopened"                                  # ...and it wasn't fixed after all
 
 
 # Many-to-many: a ticket can carry several labels, a label spans many tickets.
@@ -305,6 +306,10 @@ class Ticket(Base):
         back_populates="ticket",
         cascade="all, delete-orphan",
         order_by="TicketHandoff.sent_at",
+        # Eager: the SLA clock and "is Testing verifying a fix?" both read the
+        # chain for EVERY ticket on the board. Lazy-loading meant one query per
+        # card — an N+1 that only showed up as the board grew.
+        lazy="selectin",
     )
     epic = relationship(
         "Ticket", remote_side=[id], foreign_keys=[epic_id], backref="epic_children"

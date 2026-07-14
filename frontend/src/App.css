@@ -3091,3 +3091,21 @@ body { background: var(--color-bg); color: var(--color-text); }
   .profile-head { flex-wrap: wrap; }
 }
 
+
+/* A reopen is the loudest event in a chain: we told the customer it was fixed,
+   and it wasn't. It should not look like a routine handoff. */
+.workflow-btn.tone-reopened {
+  background: transparent;
+  border-color: var(--priority-urgent);
+  color: var(--priority-urgent);
+}
+.workflow-btn.tone-reopened:hover {
+  background: rgba(229, 72, 77, 0.1);
+}
+
+.action-pill.tone-reopen {
+  border-color: var(--priority-urgent);
+  color: var(--priority-urgent);
+  background: rgba(229, 72, 77, 0.12);
+  font-weight: 700;
+}

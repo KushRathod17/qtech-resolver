@@ -873,6 +873,28 @@ def set_sla_policy(
     return policy
 
 
+def _sla_clock_start(ticket: models.Ticket) -> datetime:
+    """When the CURRENT SLA clock started.
+
+    Normally creation. But a reopened ticket gets a fresh clock from the moment
+    it was reopened — otherwise a ticket raised in March and reopened today
+    would show as breached by four months the instant it came back, which is
+    noise, not information. The old journey is already recorded in the chain.
+
+    Derived from the handoffs rather than a stored reopened_at column: the chain
+    already knows, and a second copy of the same fact is a second thing to drift.
+    """
+    created = ticket.created_at
+    reopens = [
+        h.sent_at
+        for h in (ticket.handoffs or [])
+        if h.action == models.HandoffAction.REOPENED.value
+    ]
+    if not reopens:
+        return created
+    return max(reopens + ([created] if created else []))
+
+
 def _sla_for(ticket: models.Ticket, policies: dict) -> dict | None:
     """The live clock for one ticket, or None if its priority has no SLA.
 
@@ -891,7 +913,8 @@ def _sla_for(ticket: models.Ticket, policies: dict) -> dict | None:
     if end is None:
         end = datetime.utcnow()
 
-    elapsed = int((end - (ticket.created_at or end)).total_seconds())
+    start = _sla_clock_start(ticket) or end
+    elapsed = int((end - start).total_seconds())
     limit = threshold * 3600
     return {
         "threshold_hours": threshold,

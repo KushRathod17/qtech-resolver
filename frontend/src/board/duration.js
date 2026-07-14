@@ -25,6 +25,7 @@ export const ACTION_LABELS = {
   verified_returned_to_reporter: "Verified → Support",
   returned_still_broken: "Still broken → Development",
   resolved: "Resolved",
+  reopened: "Reopened → Testing",
 };
 
 /** Actions that mean "this went backwards" — worth colouring differently. */
@@ -36,4 +37,7 @@ export const ACTION_TONE = {
   resolved: "good",
   returned_not_reproducible: "back",
   returned_still_broken: "back",
+  // A reopen is the loudest signal in the chain: we told the customer it was
+  // fixed, and it wasn't.
+  reopened: "reopen",
 };

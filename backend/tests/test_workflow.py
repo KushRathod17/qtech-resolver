@@ -204,10 +204,16 @@ def test_a_teammate_of_the_holder_can_act(client, tester, tester2, developer, ra
     assert r.status_code == 200
 
 
-def test_a_resolved_ticket_has_no_further_actions(client, support, tester, raised):
+def test_a_resolved_ticket_offers_only_reopen(client, support, tester, raised):
+    """This test used to assert `== set()` — it encoded the bug. A closed ticket
+    is closed, not sealed: the team that closed it can reopen, and nothing else
+    is on offer."""
     handoff(client, tester["token"], raised["id"], "returned_not_reproducible", note="nope")
     handoff(client, support["token"], raised["id"], "resolved")
-    assert actions_for(client, support["token"], raised["id"]) == set()
+
+    assert actions_for(client, support["token"], raised["id"]) == {"reopened"}
+    # And the normal in-flight actions are gone.
+    assert actions_for(client, tester["token"], raised["id"]) == set()
 
 
 # ---------------------------------------------------------------- bad handoffs
@@ -348,6 +354,106 @@ def test_filter_the_board_by_what_my_team_is_holding(client, tester, developer, 
     testing_id = teams["testing"]["id"]
     r = client.get(f"/tickets/?current_team_id={testing_id}", headers=auth(tester["token"]))
     assert r.json() == []
+
+
+# ---------------------------------------------------------------- reopening
+
+@pytest.fixture()
+def resolved(client, support, tester, raised):
+    """A ticket that went all the way through and was closed."""
+    handoff(client, tester["token"], raised["id"], "returned_not_reproducible", note="cannot repro")
+    r = handoff(client, support["token"], raised["id"], "resolved", note="told the customer")
+    assert r.json()["status"] == "done"
+    return raised
+
+
+def test_a_resolved_ticket_can_be_reopened(client, support, tester, resolved):
+    """THE BUG THIS GUARDS AGAINST (found in audit, proved against real data):
+
+    A resolved workflow ticket was UNREACHABLE BY EVERY ROUTE. The customer says
+    "it's still broken" and there was nothing anyone could do:
+        POST /handoff -> 403      PATCH /tickets -> 400      PATCH /move -> 400
+    Not even an admin. The only escape was raw SQL. Reopen is table stakes in
+    every real support tool — it's how you learn the fix didn't work.
+    """
+    actions = actions_for(client, support["token"], resolved["id"])
+    assert "reopened" in actions
+
+    r = handoff(client, support["token"], resolved["id"], "reopened",
+                to_user_id=tester["id"], note="Customer says the button still does nothing.")
+    assert r.status_code == 200, r.text
+    t = r.json()
+
+    assert t["status"] == "todo"                       # back in play
+    assert t["resolved_at"] is None                    # no longer closed
+    assert t["current_team"]["name"] == "Testing/QA"   # straight back to Testing
+    assert t["assignee"]["id"] == tester["id"]
+
+
+def test_reopening_requires_a_reason(client, support, tester, resolved):
+    """'It's still broken' with no detail is useless to the tester."""
+    r = handoff(client, support["token"], resolved["id"], "reopened", to_user_id=tester["id"])
+    assert r.status_code == 400
+    assert "note" in r.json()["detail"].lower()
+
+
+def test_only_the_team_that_closed_it_can_reopen(client, tester, developer, resolved):
+    """Testing and Development don't get to reopen behind Support's back."""
+    assert actions_for(client, tester["token"], resolved["id"]) == set()
+    assert actions_for(client, developer["token"], resolved["id"]) == set()
+
+    r = handoff(client, tester["token"], resolved["id"], "reopened",
+                to_user_id=tester["id"], note="me again")
+    assert r.status_code == 403
+
+
+def test_a_reopened_ticket_runs_the_whole_flow_again(client, support, tester, developer, resolved):
+    """And can be re-resolved. The chain keeps growing rather than forking."""
+    handoff(client, support["token"], resolved["id"], "reopened",
+            to_user_id=tester["id"], note="still broken")
+    handoff(client, tester["token"], resolved["id"], "forwarded", to_user_id=developer["id"], note="repro'd")
+    handoff(client, developer["token"], resolved["id"], "fixed_returned_to_testing",
+            to_user_id=tester["id"], note="actually fixed this time")
+    handoff(client, tester["token"], resolved["id"], "verified_returned_to_reporter", note="verified")
+    r = handoff(client, support["token"], resolved["id"], "resolved", note="closed again")
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "done"
+
+    rows = client.get(f"/tickets/{resolved['id']}/handoffs", headers=auth(support["token"])).json()
+    actions = [x["action"] for x in rows]
+    assert actions.count("resolved") == 2
+    assert "reopened" in actions
+    # The chain records the whole story, including that we got it wrong once.
+    assert actions.index("reopened") < actions.index("forwarded", actions.index("reopened"))
+
+
+def test_reopening_restarts_the_sla_clock(client, support, tester, db, resolved):
+    """A ticket raised in March and reopened today must not report as breached by
+    four months the moment it comes back. The old journey is in the chain; the
+    clock measures the CURRENT attempt."""
+    from datetime import datetime, timedelta
+    from app import models
+
+    row = db.query(models.Ticket).filter(models.Ticket.id == resolved["id"]).first()
+    row.priority = models.TicketPriority.HIGHEST      # 4h target
+    row.created_at = datetime.utcnow() - timedelta(days=120)
+    db.commit()
+
+    r = handoff(client, support["token"], resolved["id"], "reopened",
+                to_user_id=tester["id"], note="back again")
+    sla = r.json()["sla"]
+
+    assert sla["breached"] is False, "the clock restarted at the reopen, not at creation"
+    assert sla["elapsed_seconds"] < 60
+
+
+def test_a_non_workflow_ticket_is_still_reopened_the_ordinary_way(client, admin, make_ticket):
+    """Tickets outside the workflow keep using the plain status edit."""
+    t = make_ticket(status="done")
+    r = client.patch(f"/tickets/{t['id']}", json={"status": "todo"}, headers=auth(admin["token"]))
+    assert r.status_code == 200
+    assert r.json()["status"] == "todo"
 
 
 # ------------------------------------------------- the chain is the only writer

@@ -335,7 +335,7 @@ export default function TicketModal({
               ) : (
                 <p className="workflow-waiting">
                   {ticket.status === "done"
-                    ? "Resolved — the chain is closed."
+                    ? "Resolved. Only the team that closed it can reopen it."
                     : "Waiting on them. You have no actions on this ticket."}
                 </p>
               )}

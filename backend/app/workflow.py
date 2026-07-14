@@ -91,6 +91,21 @@ _SUPPORT = [
     ),
 ]
 
+# The customer came back: "it's still broken". Reopening is not an edge case in
+# support — it's how you find out the fix didn't work, and a tool that can't do
+# it forces people into the database. Only the team that CLOSED it may reopen,
+# and it goes straight back to Testing, because a fix that didn't hold has to be
+# re-verified before anyone touches code again.
+_SUPPORT_RESOLVED = [
+    ActionSpec(
+        HandoffAction.REOPENED,
+        "Reopen → send back to Testing",
+        TeamKind.TESTING,
+        note_required=True,   # "the customer says X still happens"
+        resulting_status=TicketStatus.TODO,
+    ),
+]
+
 # The initial raise. Support (or anyone raising) sends it to Testing.
 RAISE_SPEC = ActionSpec(
     HandoffAction.RAISED,
@@ -112,10 +127,6 @@ def available_actions(ticket, viewer) -> list[ActionSpec]:
     if ticket.current_team_id is None:
         return []
 
-    # Already closed: the chain is over.
-    if ticket.status == TicketStatus.DONE:
-        return []
-
     # You may act only if the ticket is with you, or with your team. Being on
     # the right team but not the named person is still allowed — otherwise one
     # tester going on holiday strands the ticket.
@@ -125,6 +136,13 @@ def available_actions(ticket, viewer) -> list[ActionSpec]:
         return []
 
     kind = ticket.current_team.kind if ticket.current_team else None
+
+    # Closed — but not sealed. The team that closed it can reopen it, because
+    # "the customer says it's still broken" is a normal Tuesday, not an
+    # exception. Previously this returned [] and the ticket was unreachable by
+    # EVERY route: handoff 403, edit 400, drag 400. Even an admin was stuck.
+    if ticket.status == TicketStatus.DONE:
+        return _SUPPORT_RESOLVED if kind == TeamKind.SUPPORT else []
 
     if kind == TeamKind.DEVELOPMENT:
         return _DEVELOPMENT
