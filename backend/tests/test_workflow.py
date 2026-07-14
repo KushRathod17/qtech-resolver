@@ -356,6 +356,115 @@ def test_filter_the_board_by_what_my_team_is_holding(client, tester, developer, 
     assert r.json() == []
 
 
+# ------------------------------------------- a ticket must never lose its holder
+
+@pytest.fixture()
+def teamless_raiser(client, admin):
+    """Perfectly reachable in normal use: the People page explicitly allows
+    'Unassigned'."""
+    user = _register(client, "noteam@qtechtest.io", "Terry Teamless")
+    return {**user, "token": _token(client, "noteam@qtechtest.io")}
+
+
+@pytest.fixture()
+def raised_by_teamless(client, teamless_raiser, tester):
+    r = client.post(
+        "/tickets/",
+        json={"title": "Raised by someone with no team", "route_to_user_id": tester["id"]},
+        headers=auth(teamless_raiser["token"]),
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_returning_to_a_teamless_reporter_does_not_strand_the_ticket(
+    client, teamless_raiser, tester, teams, raised_by_teamless
+):
+    """THE BUG THIS GUARDS AGAINST (found in audit, proved before fixing):
+
+    Return-to-reporter set current_team_id from reporter.team. If the reporter
+    had no team that was NULL — and a ticket with no current team is invisible to
+    available_actions. The ticket silently fell OUT of the workflow:
+
+        reporter -> 0 actions,  tester -> 0 actions,  admin -> 0 actions
+
+    The chain of custody ended mid-sentence and the ticket vanished from the
+    workflow report. Nothing warned anyone.
+    """
+    r = handoff(client, tester["token"], raised_by_teamless["id"],
+                "returned_not_reproducible", note="works on my machine")
+    assert r.status_code == 200, r.text
+    t = r.json()
+
+    # It stays IN the workflow — parked with Support, the team that closes things.
+    assert t["current_team"] is not None
+    assert t["current_team"]["name"] == "Contact/Support"
+    assert t["assignee"]["id"] == teamless_raiser["id"]
+
+    # And the teamless reporter can still act, because they're the assignee.
+    assert actions_for(client, teamless_raiser["token"], raised_by_teamless["id"]) == {"resolved"}
+
+
+def test_the_teamless_reporter_can_actually_close_it(
+    client, teamless_raiser, tester, raised_by_teamless
+):
+    """The whole point: the ticket reaches an ending instead of rotting."""
+    handoff(client, tester["token"], raised_by_teamless["id"],
+            "returned_not_reproducible", note="cannot reproduce")
+
+    r = handoff(client, teamless_raiser["token"], raised_by_teamless["id"], "resolved",
+                note="told the customer")
+    assert r.status_code == 200
+    assert r.json()["status"] == "done"
+
+
+def test_a_verified_fix_also_returns_safely_to_a_teamless_reporter(
+    client, teamless_raiser, tester, developer, raised_by_teamless
+):
+    """The other route home has the same hole."""
+    handoff(client, tester["token"], raised_by_teamless["id"], "forwarded",
+            to_user_id=developer["id"], note="repro'd")
+    handoff(client, developer["token"], raised_by_teamless["id"], "fixed_returned_to_testing",
+            to_user_id=tester["id"], note="fixed")
+
+    r = handoff(client, tester["token"], raised_by_teamless["id"],
+                "verified_returned_to_reporter", note="verified")
+    assert r.status_code == 200
+    assert r.json()["current_team"] is not None
+    assert r.json()["assignee"]["id"] == teamless_raiser["id"]
+
+
+def test_a_ticket_in_the_workflow_never_loses_its_holder(
+    client, teamless_raiser, tester, raised_by_teamless
+):
+    """The invariant, stated directly: at no point in any chain may
+    current_team_id become NULL while the ticket is still live."""
+    handoff(client, tester["token"], raised_by_teamless["id"],
+            "returned_not_reproducible", note="nope")
+
+    rows = client.get(f"/reports/workflow", headers=auth(tester["token"])).json()
+    row = next(r for r in rows if r["ticket_id"] == raised_by_teamless["id"])
+    # It's still in the report at all — before the fix it vanished from it.
+    assert row["current_team"] is not None
+
+
+def test_with_no_support_team_the_handoff_is_refused_not_silently_broken(
+    client, admin, tester, teamless_raiser, teams, raised_by_teamless
+):
+    """If there's nowhere to fall back to, say so loudly rather than stranding
+    the ticket."""
+    # Move the ticket off Support's plate first so the team can be deleted.
+    client.delete(f"/teams/{teams['support']['id']}", headers=auth(admin["token"]))
+
+    r = handoff(client, tester["token"], raised_by_teamless["id"],
+                "returned_not_reproducible", note="nope")
+    assert r.status_code == 400
+    detail = r.json()["detail"].lower()
+    assert "team" in detail
+    # And the ticket is untouched — still with Testing, still actionable.
+    assert actions_for(client, tester["token"], raised_by_teamless["id"]) != set()
+
+
 # ---------------------------------------------------------------- reopening
 
 @pytest.fixture()

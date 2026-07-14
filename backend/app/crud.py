@@ -667,7 +667,30 @@ def _resolve_handoff_target(
 
     if spec.target_kind is None:
         reporter = get_user(db, ticket.created_by_id)
-        return reporter, (reporter.team if reporter else None)
+        if not reporter:
+            raise ValueError(
+                "The person who raised this no longer has an account, so there's nobody to "
+                "return it to. Hand it to someone else instead."
+            )
+
+        # THE BUG THIS GUARDS AGAINST: if the reporter has no team, this used to
+        # return (reporter, None) — which set current_team_id = NULL, and a
+        # ticket with no current team is invisible to available_actions. The
+        # ticket silently fell OUT of the workflow: nobody could act on it, not
+        # even an admin, and it vanished from the workflow report. Proved with a
+        # teamless reporter before fixing.
+        #
+        # A teamless reporter isn't an error — People explicitly allows
+        # "Unassigned". So park it with the Support team, which is the team that
+        # closes tickets anyway. The reporter can still act on it because they're
+        # the assignee, team or no team.
+        team = reporter.team or get_team_by_kind(db, models.TeamKind.SUPPORT)
+        if not team:
+            raise ValueError(
+                f"{reporter.full_name} isn't on a team, and there's no Support team to fall "
+                "back on. Create one in Settings, or put them on a team on the People page."
+            )
+        return reporter, team
 
     if not to_user_id:
         raise ValueError("This action needs a person to hand the ticket to")
@@ -694,6 +717,16 @@ def perform_handoff(
         raise ValueError("This action needs a note explaining what you found")
 
     target_user, target_team = _resolve_handoff_target(db, ticket, spec, payload.to_user_id)
+
+    # INVARIANT: a ticket in the workflow must always be held by SOMEBODY.
+    # current_team_id = NULL means available_actions returns [] for everyone, so
+    # the ticket becomes unreachable — the exact failure this slice fixes.
+    # Belt and braces: refuse rather than let a future action route into the void.
+    if spec.action != models.HandoffAction.RESOLVED and (target_team is None or target_user is None):
+        raise ValueError(
+            "That handoff has no destination — it would leave the ticket with nobody. "
+            "Pick a person on a team."
+        )
 
     handoff = models.TicketHandoff(
         ticket_id=ticket.id,
