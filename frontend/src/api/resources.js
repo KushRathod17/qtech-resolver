@@ -126,6 +126,8 @@ export const usersApi = {
   profile: (id) => apiClient.get(`/users/${id}`).then((r) => r.data),
   workflowProfile: (id) =>
     apiClient.get(`/users/${id}/workflow-profile`).then((r) => r.data),
+  contributions: (id) =>
+    apiClient.get(`/users/${id}/contributions`).then((r) => r.data),
   stats: (id) => apiClient.get(`/users/${id}/stats`).then((r) => r.data),
   tickets: (id) => apiClient.get(`/users/${id}/tickets`).then((r) => r.data),
 

@@ -13,6 +13,7 @@ import Components from "./pages/Components";
 import Backlog from "./pages/Backlog";
 import Workflow from "./pages/Workflow";
 import People from "./pages/People";
+import MyTickets from "./pages/MyTickets";
 import ChangePassword from "./pages/ChangePassword";
 import Placeholder from "./pages/Placeholder";
 
@@ -47,6 +48,7 @@ function AppRoutes() {
         <Route path="/reports" element={<Reports />} />
         <Route path="/workflow" element={<Workflow />} />
         <Route path="/people" element={<People />} />
+        <Route path="/my-tickets" element={<MyTickets />} />
         <Route path="/sprints" element={<Sprints />} />
         <Route path="/components" element={<Components />} />
         <Route

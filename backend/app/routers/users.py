@@ -10,6 +10,7 @@ from ..models import User, UserRole
 from ..schemas import (
     UserOut, UserRoleUpdate, UserTeamUpdate, UserUpdate, UserProfileOut, UserStats,
     PasswordChange, TicketOut, UserCreateByAdmin, TeamMemberOut, WorkflowProfileOut,
+    ContributionsOut,
 )
 from ..security import verify_password
 from .. import crud
@@ -154,6 +155,20 @@ def get_workflow_profile(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return crud.user_workflow_profile(db, user)
+
+
+@router.get("/{user_id}/contributions", response_model=ContributionsOut)
+def get_contributions(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """"Tickets I solved": what this person fixed, what they verified (kept
+    separate), and what's on their desk now. All derived from the handoff chain."""
+    user = crud.get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return crud.user_contributions(db, user)
 
 
 @router.get("/{user_id}/stats", response_model=UserStats)

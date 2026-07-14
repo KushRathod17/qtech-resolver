@@ -193,6 +193,13 @@ class TicketHandoff(Base):
     from_user = relationship("User", foreign_keys=[from_user_id])
     to_user = relationship("User", foreign_keys=[to_user_id])
 
+    # "Tickets I fixed / verified" filters handoffs by who ACTED (from_user) and
+    # what they did (action). Without this it's a sequential scan of every
+    # handoff, once per profile view.
+    __table_args__ = (
+        Index("ix_ticket_handoffs_from_action", "from_user_id", "action"),
+    )
+
 
 class Component(Base):
     """A part of the system a ticket belongs to — OTRAMS-Booking, RateNet-API,

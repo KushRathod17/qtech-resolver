@@ -510,6 +510,88 @@ def set_user_team(db: Session, user: models.User, team_id: uuid.UUID | None) -> 
     return user
 
 
+def _contribution_row(ticket: models.Ticket, when) -> dict:
+    return {
+        "id": ticket.id,
+        "key": ticket.key,
+        "title": ticket.title,
+        "status": ticket.status,
+        "priority": ticket.priority,
+        "ticket_type": ticket.ticket_type,
+        "component": ticket.component,
+        "client_name": ticket.client_name,
+        "assignee": ticket.assignee,
+        "contributed_at": when,
+    }
+
+
+def user_contributions(db: Session, user: models.User) -> dict:
+    """"Tickets I solved", derived from the handoff chain — no new column.
+
+    Who FIXED a ticket = the from_user of a `fixed_returned_to_testing` handoff.
+    Who VERIFIED it = the from_user of a `verified_returned_to_reporter` handoff.
+    These are kept separate on purpose: fixing and testing are different jobs.
+
+    A ticket only counts as "fixed & resolved" if it is CURRENTLY done — a fix
+    that was later reopened hasn't held, so it moves to fixed_reopened rather
+    than silently inflating the solved count.
+    """
+    my_handoffs = (
+        db.query(models.TicketHandoff)
+        .options(joinedload(models.TicketHandoff.ticket).joinedload(models.Ticket.component),
+                 joinedload(models.TicketHandoff.ticket).joinedload(models.Ticket.assignee))
+        .filter(models.TicketHandoff.from_user_id == user.id)
+        .order_by(models.TicketHandoff.sent_at.desc())
+        .all()
+    )
+
+    # Latest fix/verify moment per ticket (handoffs already sorted desc).
+    fixed_at: dict[uuid.UUID, tuple] = {}      # ticket_id -> (ticket, when)
+    verified_at: dict[uuid.UUID, tuple] = {}
+    for h in my_handoffs:
+        if not h.ticket:
+            continue
+        if h.action == models.HandoffAction.FIXED_RETURNED_TO_TESTING.value:
+            fixed_at.setdefault(h.ticket_id, (h.ticket, h.sent_at))
+        elif h.action == models.HandoffAction.VERIFIED_RETURNED_TO_REPORTER.value:
+            verified_at.setdefault(h.ticket_id, (h.ticket, h.sent_at))
+
+    def split_by_done(source: dict):
+        done, not_done = [], []
+        for ticket, when in source.values():
+            (done if ticket.status == models.TicketStatus.DONE else not_done).append(
+                _contribution_row(ticket, when)
+            )
+        done.sort(key=lambda r: r["contributed_at"], reverse=True)
+        not_done.sort(key=lambda r: r["contributed_at"], reverse=True)
+        return done, not_done
+
+    fixed, fixed_reopened = split_by_done(fixed_at)
+    verified, _ = split_by_done(verified_at)   # a verified ticket that reopened isn't "verified & done"
+
+    # On their desk right now — assigned and not resolved. The actionable list.
+    open_assigned = (
+        _ticket_query(db)
+        .filter(
+            models.Ticket.assignee_id == user.id,
+            models.Ticket.status != models.TicketStatus.DONE,
+            models.Ticket.parent_id.is_(None),
+        )
+        .order_by(models.Ticket.updated_at.desc())
+        .all()
+    )
+    open_rows = [_contribution_row(t, t.updated_at) for t in open_assigned]
+
+    return {
+        "user": user,
+        "fixed": fixed,
+        "fixed_reopened": fixed_reopened,
+        "verified": verified,
+        "open_assigned": open_rows,
+        "workload": {"open_tickets": len(open_rows), "band": workload_band(len(open_rows))},
+    }
+
+
 def user_workflow_profile(db: Session, user: models.User) -> dict:
     """Everything the profile page shows, derived from ticket_handoffs.
 
@@ -530,11 +612,21 @@ def user_workflow_profile(db: Session, user: models.User) -> dict:
         .all()
     )
 
-    # Tickets they reported. Covers non-workflow tickets too, which is right:
-    # raising one is still involvement.
+    # Tickets they RAISED INTO THE WORKFLOW — created by them AND actually routed
+    # to a team (has at least one handoff).
+    #
+    # Scoped deliberately. Counting every ticket with created_by_id = you swept
+    # in seed/board authorship: it made Priya show "raised 25" purely because she
+    # was the author field on 25 board cards she never routed anywhere. In a
+    # support profile "raised" means "raised a customer bug into the flow", not
+    # "is the author column on some card".
     reported = (
         db.query(models.Ticket)
-        .filter(models.Ticket.created_by_id == user.id, models.Ticket.parent_id.is_(None))
+        .filter(
+            models.Ticket.created_by_id == user.id,
+            models.Ticket.parent_id.is_(None),
+            models.Ticket.handoffs.any(),   # entered the cross-team workflow
+        )
         .all()
     )
 

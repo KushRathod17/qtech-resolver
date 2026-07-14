@@ -3236,3 +3236,42 @@ body { background: var(--color-bg); color: var(--color-text); }
   color: var(--color-text-faint);
   font-family: var(--font-mono);
 }
+
+/* ==========================================================================
+   My Tickets / contributions
+   ========================================================================== */
+.my-tickets-page {
+  padding: 24px 28px 40px;
+}
+
+/* The pinned personal shortcut, set apart from the project nav below it. */
+.nav-link-mine {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.nav-link-mine .nav-icon { color: var(--priority-high); }
+.nav-link-mine.active .nav-icon { color: var(--color-accent); }
+
+.nav-divider {
+  height: 1px;
+  margin: 8px 10px;
+  background: var(--color-border);
+  list-style: none;
+}
+
+.stat-tile.tone-good { border-left: 3px solid var(--priority-low); }
+.stat-tile.tone-warn { border-left: 3px solid var(--priority-high); }
+
+.contrib-table td { vertical-align: middle; }
+.contrib-when {
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--color-text-faint);
+}
+
+.contrib-table .profile-ticket {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}

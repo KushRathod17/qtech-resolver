@@ -1,5 +1,9 @@
 import { NavLink } from "react-router-dom";
 
+// Pinned to the top, on its own, because it's the one thing a person opens about
+// THEMSELVES — what's on my desk, what I've solved — not about the project.
+const MINE = { to: "/my-tickets", label: "My Tickets", icon: "★" };
+
 const NAV = [
   { to: "/backlog", label: "Backlog", icon: "☰" },
   { to: "/board", label: "Board", icon: "▦" },
@@ -24,6 +28,17 @@ export default function Sidebar() {
       </div>
 
       <ul className="nav-list">
+        <li>
+          <NavLink
+            to={MINE.to}
+            className={({ isActive }) => `nav-link nav-link-mine ${isActive ? "active" : ""}`}
+          >
+            <span className="nav-icon" aria-hidden="true">{MINE.icon}</span>
+            {MINE.label}
+          </NavLink>
+        </li>
+        <li className="nav-divider" aria-hidden="true" />
+
         {NAV.map((item) => (
           <li key={item.to}>
             <NavLink

@@ -190,6 +190,97 @@ class WorkflowProfileOut(BaseModel):
     history: list[ProfileHistoryRow]
 
 
+# ---------- Components ----------
+class ComponentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    description: Optional[str] = Field(default=None, max_length=300)
+    color: str = Field(default="#3E7BFA", pattern=HEX_COLOR)
+    lead_id: Optional[uuid.UUID] = None
+
+
+class ComponentUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    description: Optional[str] = Field(default=None, max_length=300)
+    color: Optional[str] = Field(default=None, pattern=HEX_COLOR)
+    lead_id: Optional[uuid.UUID] = None
+
+
+class ComponentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    description: Optional[str]
+    color: str
+    lead: Optional[UserOut] = None
+
+
+class ComponentStats(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    description: Optional[str]
+    color: str
+    lead: Optional[UserOut] = None
+    open_tickets: int
+    total_tickets: int
+    breached: int
+
+
+# ---------- SLA ----------
+class SLAPolicyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    priority: TicketPriority
+    threshold_hours: Optional[int]
+
+
+class SLAPolicyUpdate(BaseModel):
+    # Null switches the SLA off for this priority.
+    threshold_hours: Optional[int] = Field(default=None, ge=1, le=8760)
+
+
+class SLAOut(BaseModel):
+    """The live clock on a ticket. Everything here is derived, never stored —
+    storing 'overdue' would be a lie the moment the clock ticks past it."""
+    threshold_hours: int
+    elapsed_seconds: int
+    remaining_seconds: int   # negative once breached
+    breached: bool
+    stopped: bool            # true once resolved: the clock is frozen
+
+
+# ---------- Contributions ("tickets I solved") ----------
+class ContributionTicket(BaseModel):
+    """A ticket, seen from the angle of one person's contribution to it."""
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    key: str
+    title: str
+    status: TicketStatus
+    priority: TicketPriority
+    ticket_type: TicketType
+    component: Optional[ComponentOut] = None
+    client_name: Optional[str] = None
+    assignee: Optional[UserOut] = None
+    # When they made their contribution to this ticket (the fix/verify handoff,
+    # or last touch). Lets the lists sort most-recent-first.
+    contributed_at: datetime
+
+
+class ContributionsOut(BaseModel):
+    user: UserOut
+    # Fixed by them AND currently resolved — "I fixed it and it stuck".
+    fixed: list[ContributionTicket]
+    # Fixed by them but since reopened — their work, shown honestly rather than
+    # vanishing the moment a customer comes back.
+    fixed_reopened: list[ContributionTicket]
+    # Verified by them (as tester) AND resolved. Deliberately SEPARATE from
+    # fixed: "I fixed it" and "I tested it" are different contributions.
+    verified: list[ContributionTicket]
+    # What's on their desk right now — assigned and not done. The actionable list.
+    open_assigned: list[ContributionTicket]
+    workload: UserWorkload
+
+
 # ---------- Workflow / handoffs ----------
 class HandoffCreate(BaseModel):
     action: HandoffAction
@@ -254,64 +345,6 @@ class TeamHoldingTime(BaseModel):
     average_hold_seconds: Optional[float]
     longest_hold_seconds: Optional[int]
     currently_holding: int
-
-
-# ---------- Components ----------
-class ComponentCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=60)
-    description: Optional[str] = Field(default=None, max_length=300)
-    color: str = Field(default="#3E7BFA", pattern=HEX_COLOR)
-    lead_id: Optional[uuid.UUID] = None
-
-
-class ComponentUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=60)
-    description: Optional[str] = Field(default=None, max_length=300)
-    color: Optional[str] = Field(default=None, pattern=HEX_COLOR)
-    lead_id: Optional[uuid.UUID] = None
-
-
-class ComponentOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    name: str
-    description: Optional[str]
-    color: str
-    lead: Optional[UserOut] = None
-
-
-class ComponentStats(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    name: str
-    description: Optional[str]
-    color: str
-    lead: Optional[UserOut] = None
-    open_tickets: int
-    total_tickets: int
-    breached: int
-
-
-# ---------- SLA ----------
-class SLAPolicyOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    priority: TicketPriority
-    threshold_hours: Optional[int]
-
-
-class SLAPolicyUpdate(BaseModel):
-    # Null switches the SLA off for this priority.
-    threshold_hours: Optional[int] = Field(default=None, ge=1, le=8760)
-
-
-class SLAOut(BaseModel):
-    """The live clock on a ticket. Everything here is derived, never stored —
-    storing 'overdue' would be a lie the moment the clock ticks past it."""
-    threshold_hours: int
-    elapsed_seconds: int
-    remaining_seconds: int   # negative once breached
-    breached: bool
-    stopped: bool            # true once resolved: the clock is frozen
 
 
 # ---------- Sprints ----------

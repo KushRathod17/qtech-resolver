@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import { Avatar, COLUMNS } from "../board/constants";
 import { formatDateTime } from "../board/duration";
 import WorkloadBadge, { BAND_HINT } from "../components/WorkloadBadge";
+import ContributionList from "../components/ContributionList";
 
 const STATUS_LABEL = Object.fromEntries(COLUMNS.map((c) => [c.key, c.label]));
 
@@ -37,6 +38,7 @@ export default function Profile() {
   const userId = id === "me" ? me?.id : id;
 
   const [profile, setProfile] = useState(null);
+  const [contrib, setContrib] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -45,7 +47,12 @@ export default function Profile() {
     setLoading(true);
     try {
       setError("");
-      setProfile(await usersApi.workflowProfile(userId));
+      const [p, c] = await Promise.all([
+        usersApi.workflowProfile(userId),
+        usersApi.contributions(userId),
+      ]);
+      setProfile(p);
+      setContrib(c);
     } catch (err) {
       setError(errorMessage(err, "Couldn't load that profile."));
     } finally {
@@ -108,6 +115,49 @@ export default function Profile() {
           hint={`${completed} done · ${stillOpen} open`}
         />
       </div>
+
+      {contrib && (
+        <>
+          <section className="settings-panel">
+            <div className="settings-panel-head">
+              <h3>Fixed &amp; resolved <span className="subtask-tally">{contrib.fixed.length}</span></h3>
+              <p className="chart-sub">
+                Bugs {isMe ? "I was" : `${user.full_name} was`} the developer on, that reached
+                Resolved and stayed there.
+              </p>
+            </div>
+            <ContributionList
+              tickets={contrib.fixed}
+              dateLabel="Fixed"
+              emptyText="Nothing fixed-and-resolved yet."
+            />
+          </section>
+
+          {contrib.fixed_reopened.length > 0 && (
+            <section className="settings-panel">
+              <div className="settings-panel-head">
+                <h3>Fixed, since reopened <span className="subtask-tally">{contrib.fixed_reopened.length}</span></h3>
+                <p className="chart-sub">Fixed, but came back — shown so the work isn't invisible.</p>
+              </div>
+              <ContributionList tickets={contrib.fixed_reopened} dateLabel="Fixed" emptyText="" />
+            </section>
+          )}
+
+          <section className="settings-panel">
+            <div className="settings-panel-head">
+              <h3>Verified <span className="subtask-tally">{contrib.verified.length}</span></h3>
+              <p className="chart-sub">
+                Fixes {isMe ? "I" : "they"} tested and signed off — a different job from fixing.
+              </p>
+            </div>
+            <ContributionList
+              tickets={contrib.verified}
+              dateLabel="Verified"
+              emptyText="Nothing verified yet."
+            />
+          </section>
+        </>
+      )}
 
       <section className="settings-panel">
         <div className="settings-panel-head">
