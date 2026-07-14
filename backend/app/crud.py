@@ -953,11 +953,31 @@ def _display(db: Session, field: str, value) -> str:
     return str(value)
 
 
+# On a ticket inside the cross-team workflow, these fields are owned by the
+# handoff chain. Letting the generic edit form (or a board drag) also write them
+# gives two writers one field — and the loser is the chain of custody, which is
+# the one thing this feature has to be trustworthy about.
+WORKFLOW_OWNED_FIELDS = {"status", "assignee_id"}
+
+
+def _reject_workflow_owned_edits(ticket: models.Ticket, fields) -> None:
+    if ticket.current_team_id is None:
+        return  # not in the workflow — the board owns these as it always did
+    clashing = WORKFLOW_OWNED_FIELDS & set(fields)
+    if clashing:
+        raise ValueError(
+            "This ticket's status and assignee are set by the cross-team workflow. "
+            "Use the handoff buttons on the ticket rather than editing them directly."
+        )
+
+
 def update_ticket(
     db: Session, ticket: models.Ticket, ticket_in: schemas.TicketUpdate, actor_id: uuid.UUID
 ) -> models.Ticket:
     update_data = ticket_in.model_dump(exclude_unset=True)
     label_ids = update_data.pop("label_ids", None)
+
+    _reject_workflow_owned_edits(ticket, update_data)
 
     for field, new_value in update_data.items():
         old_value = getattr(ticket, field)
@@ -1086,6 +1106,13 @@ def bulk_update_tickets(
     next_rank = _top_rank(db, bulk.status) if bulk.status else None
 
     for ticket in tickets:
+        # Same reason as update/move: a bulk status change must not silently
+        # bypass the chain of custody.
+        if bulk.status and bulk.status != ticket.status:
+            _reject_workflow_owned_edits(ticket, {"status"})
+        if (bulk.assignee_id or bulk.clear_assignee) and ticket.current_team_id is not None:
+            _reject_workflow_owned_edits(ticket, {"assignee_id"})
+
         if bulk.status and bulk.status != ticket.status:
             log_activity(db, ticket.id, actor_id, "status_changed",
                          f"{ticket.status.value} -> {bulk.status.value}")
@@ -1163,6 +1190,12 @@ def bulk_delete_tickets(db: Session, ticket_ids: list[uuid.UUID]) -> int:
 
 def move_ticket(db: Session, ticket: models.Ticket, move: schemas.TicketMove, actor_id: uuid.UUID) -> models.Ticket:
     """Drag-and-drop: set the column, and position between two neighbours."""
+    # Dragging a workflow ticket to Done would close it with no resolved handoff,
+    # so the board and the chain of custody would disagree. Reordering WITHIN a
+    # column is still fine — that's just rank.
+    if move.status != ticket.status:
+        _reject_workflow_owned_edits(ticket, {"status"})
+
     before = get_ticket(db, move.before_id) if move.before_id else None
     after = get_ticket(db, move.after_id) if move.after_id else None
 

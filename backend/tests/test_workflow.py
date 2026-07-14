@@ -350,6 +350,100 @@ def test_filter_the_board_by_what_my_team_is_holding(client, tester, developer, 
     assert r.json() == []
 
 
+# ------------------------------------------------- the chain is the only writer
+
+def test_the_edit_form_cannot_overwrite_the_workflow(client, support, tester, developer, raised):
+    """THE BUG THIS GUARDS AGAINST (found in real use):
+
+    The ticket panel's "Save changes" PATCHes status + assignee from the form as
+    it was when the panel OPENED. After a handoff, that stale snapshot was
+    written back — silently undoing the entire chain. A ticket that had been
+    raised, tested, fixed, verified and resolved sat back in To Do, assigned to
+    the tester, with resolved_at cleared.
+
+    status and assignee belong to the handoff chain. Nothing else may write them.
+    """
+    handoff(client, tester["token"], raised["id"], "forwarded", to_user_id=developer["id"])
+
+    # Exactly what the stale form would have sent.
+    r = client.patch(
+        f"/tickets/{raised['id']}",
+        json={"status": "todo", "assignee_id": tester["id"]},
+        headers=auth(support["token"]),
+    )
+    assert r.status_code == 400
+    assert "workflow" in r.json()["detail"].lower()
+
+    fresh = client.get(f"/tickets/{raised['id']}", headers=auth(support["token"])).json()
+    assert fresh["status"] == "in_progress"                 # not clobbered
+    assert fresh["assignee"]["id"] == developer["id"]
+    assert fresh["current_team"]["name"] == "Development"
+
+
+def test_other_fields_are_still_editable_on_a_workflow_ticket(client, support, raised):
+    """The guard must not lock the whole ticket — only status and assignee."""
+    r = client.patch(
+        f"/tickets/{raised['id']}",
+        json={"title": "Book button dead", "priority": "highest", "client_name": "Kesari Tours"},
+        headers=auth(support["token"]),
+    )
+    assert r.status_code == 200
+    assert r.json()["title"] == "Book button dead"
+    assert r.json()["priority"] == "highest"
+
+
+def test_dragging_a_workflow_ticket_to_another_column_is_rejected(client, support, raised):
+    """Dragging it to Done would close it with no `resolved` handoff, so the
+    board and the chain of custody would disagree about what happened."""
+    r = client.patch(
+        f"/tickets/{raised['id']}/move",
+        json={"status": "done"},
+        headers=auth(support["token"]),
+    )
+    assert r.status_code == 400
+    assert "workflow" in r.json()["detail"].lower()
+
+
+def test_reordering_within_a_column_is_still_allowed(client, support, tester, raised):
+    """Rank is not workflow-owned — only the column is."""
+    r = client.patch(
+        f"/tickets/{raised['id']}/move",
+        json={"status": raised["status"]},   # same column, just a reposition
+        headers=auth(support["token"]),
+    )
+    assert r.status_code == 200
+
+
+def test_bulk_cannot_bypass_the_workflow_either(client, admin, support, tester, raised):
+    r = client.patch(
+        "/tickets/bulk",
+        json={"ticket_ids": [raised["id"]], "status": "done"},
+        headers=auth(admin["token"]),
+    )
+    assert r.status_code == 400
+
+    r = client.patch(
+        "/tickets/bulk",
+        json={"ticket_ids": [raised["id"]], "assignee_id": support["id"]},
+        headers=auth(admin["token"]),
+    )
+    assert r.status_code == 400
+
+
+def test_a_normal_ticket_is_completely_unaffected(client, admin, dev, make_ticket):
+    """Tickets outside the workflow keep every bit of their old behaviour."""
+    t = make_ticket(title="Ordinary")
+
+    assert client.patch(
+        f"/tickets/{t['id']}", json={"status": "done", "assignee_id": dev["id"]},
+        headers=auth(admin["token"]),
+    ).status_code == 200
+
+    assert client.patch(
+        f"/tickets/{t['id']}/move", json={"status": "todo"}, headers=auth(admin["token"])
+    ).status_code == 200
+
+
 def test_a_team_holding_tickets_cannot_be_deleted(client, admin, teams, raised):
     r = client.delete(f"/teams/{teams['testing']['id']}", headers=auth(admin["token"]))
     assert r.status_code == 400

@@ -112,6 +112,9 @@ export default function TicketCard({ ticket, onOpen, onSelect, selected }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: ticket.id,
     data: { ticket },
+    // A workflow ticket's column is set by its handoff chain. Dragging it would
+    // be rejected by the server, so don't offer the gesture at all.
+    disabled: Boolean(ticket.current_team),
   });
 
   const style = {

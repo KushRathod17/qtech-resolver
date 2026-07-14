@@ -31,10 +31,13 @@ def bulk_update_tickets(
     current_user: User = Depends(get_current_user),
 ):
     """Apply one change set to many tickets in a single transaction."""
-    updated = crud.bulk_update_tickets(db, payload, actor_id=current_user.id)
+    try:
+        updated = crud.bulk_update_tickets(db, payload, actor_id=current_user.id)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
     if not updated:
         raise HTTPException(status_code=404, detail="None of those tickets exist")
-    return updated
+    return crud.attach_workflow(db, updated, current_user)
 
 
 @router.post("/bulk/delete", status_code=status.HTTP_200_OK)
@@ -152,7 +155,10 @@ def update_ticket(
     ticket = crud.get_ticket(db, ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    updated = crud.update_ticket(db, ticket, payload, actor_id=current_user.id)
+    try:
+        updated = crud.update_ticket(db, ticket, payload, actor_id=current_user.id)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
     return crud.attach_workflow(db, [updated], current_user)[0]
 
 
@@ -167,7 +173,10 @@ def move_ticket(
     ticket = crud.get_ticket(db, ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return crud.move_ticket(db, ticket, payload, actor_id=current_user.id)
+    try:
+        return crud.move_ticket(db, ticket, payload, actor_id=current_user.id)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
 
 
 @router.delete("/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)

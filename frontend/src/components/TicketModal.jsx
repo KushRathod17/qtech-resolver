@@ -70,6 +70,18 @@ export default function TicketModal({
   const canDelete = user?.role === "admin" || user?.role === "manager";
 
   const [form, setForm] = useState(isNew ? BLANK : ticketToForm(ticket));
+
+  // A handoff replaces the ticket underneath us. Without this, the panel keeps
+  // rendering the state it opened with — the workflow strip never updates, it
+  // LOOKS like nothing happened, and a subsequent "Save changes" writes the
+  // stale snapshot back over everything the workflow just did.
+  useEffect(() => {
+    if (!isNew && ticket) setForm(ticketToForm(ticket));
+  }, [isNew, ticket]);
+
+  // In the workflow, status and assignee belong to the handoff chain, not to
+  // this form. Two writers on one field, and the loser is the chain of custody.
+  const workflowOwned = !isNew && Boolean(ticket.current_team);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -137,11 +149,12 @@ export default function TicketModal({
     return {
       title: form.title.trim(),
       description: form.description.trim() || null,
-      status: form.status,
+      // Omitted entirely for a workflow ticket — sending them would be rejected
+      // by the server anyway, and rightly so.
+      ...(workflowOwned ? {} : { status: form.status, assignee_id: form.assignee_id || null }),
       priority: form.priority,
       ticket_type: form.ticket_type,
       story_points: form.story_points === "" ? null : Number(form.story_points),
-      assignee_id: form.assignee_id || null,
       component_id: form.component_id || null,
       client_name: form.client_name.trim() || null,
       due_date: form.due_date ? new Date(form.due_date).toISOString() : null,
@@ -361,11 +374,18 @@ export default function TicketModal({
             </div>
             <div className="field">
               <label htmlFor="t-status">Status</label>
-              <select id="t-status" value={form.status} onChange={set("status")}>
-                {COLUMNS.map((c) => (
-                  <option key={c.key} value={c.key}>{c.label}</option>
-                ))}
-              </select>
+              {workflowOwned ? (
+                <p className="locked-field" title="Set by the cross-team workflow">
+                  {COLUMNS.find((c) => c.key === ticket.status)?.label || ticket.status}
+                  <span className="locked-hint">workflow</span>
+                </p>
+              ) : (
+                <select id="t-status" value={form.status} onChange={set("status")}>
+                  {COLUMNS.map((c) => (
+                    <option key={c.key} value={c.key}>{c.label}</option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
 
@@ -395,12 +415,19 @@ export default function TicketModal({
           <div className="field-row">
             <div className="field">
               <label htmlFor="t-assignee">Assignee</label>
-              <select id="t-assignee" value={form.assignee_id} onChange={set("assignee_id")}>
-                <option value="">Unassigned</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>{u.full_name}</option>
-                ))}
-              </select>
+              {workflowOwned ? (
+                <p className="locked-field" title="Set by the cross-team workflow">
+                  {ticket.assignee?.full_name || "Unassigned"}
+                  <span className="locked-hint">workflow</span>
+                </p>
+              ) : (
+                <select id="t-assignee" value={form.assignee_id} onChange={set("assignee_id")}>
+                  <option value="">Unassigned</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>{u.full_name}</option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className="field">
               <label htmlFor="t-due">Due date</label>

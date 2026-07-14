@@ -335,6 +335,10 @@ export default function Board() {
         ? prev.map((t) => (t.id === saved.id ? saved : t))
         : [...prev, saved]
     );
+    // Keep the OPEN panel in step. Without this it keeps rendering the ticket
+    // as it was when opened, so a handoff appears to do nothing — and the next
+    // "Save changes" writes that stale snapshot back over the workflow.
+    setOpenTicket((cur) => (cur && cur.id === saved.id ? saved : cur));
   }
 
   return (
