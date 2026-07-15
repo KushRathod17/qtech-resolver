@@ -383,6 +383,47 @@ class TeamHoldingTime(BaseModel):
     currently_holding: int
 
 
+# ---------- Management reports ----------
+class TicketSummaryOut(BaseModel):
+    """A ticket as seen in a report table — enough to identify and click
+    through to it, not the full detail-view payload."""
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    key: str
+    title: str
+    status: TicketStatus
+    priority: TicketPriority
+    assignee: Optional[UserOut]
+
+
+class ReportOverviewOut(BaseModel):
+    total_tickets: int
+    by_status: dict[str, int]
+    total_points: int
+    completed_points: int
+
+
+class StaleTicketOut(BaseModel):
+    ticket: TicketSummaryOut
+    last_activity_at: datetime
+    days_since_activity: int
+
+
+class EmployeeProgressOut(BaseModel):
+    user: UserOut
+    assigned_count: int
+    done_count: int
+    in_progress_count: int
+    points_completed: int
+
+
+class LabelBreakdownOut(BaseModel):
+    label: LabelOut
+    total_count: int
+    done_count: int
+    points_total: int
+
+
 # ---------- Sprints ----------
 class SprintCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)

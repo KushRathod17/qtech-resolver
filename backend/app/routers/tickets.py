@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -66,6 +67,8 @@ def list_tickets(
     watching: bool = Query(default=False, description="Only tickets you watch"),
     include_subtasks: bool = Query(default=False, description="Sub-tasks are hidden by default"),
     search: Optional[str] = Query(default=None, description="Matches title, description, client, or ticket number"),
+    date_from: Optional[date] = Query(default=None, description="Only tickets created on/after this date"),
+    date_to: Optional[date] = Query(default=None, description="Only tickets created on/before this date"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -86,6 +89,8 @@ def list_tickets(
         watcher_id=current_user.id if watching else None,
         include_subtasks=include_subtasks,
         search=search,
+        date_from=date_from,
+        date_to=date_to,
     )
     return crud.attach_workflow(db, tickets, current_user)
 

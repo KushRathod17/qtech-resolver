@@ -554,6 +554,120 @@ def team_holding_times(db: Session, organization_id: uuid.UUID) -> list[dict]:
     return rows
 
 
+# ---------- Management reports ----------
+# Shared by all four functions below: every one accepts the same filter kwargs
+# as get_tickets (assignee_id, label_id, product, current_team_id, date_from,
+# date_to, ...) so a manager can compose "payment-issue label + last 30 days +
+# Priya" once and see it reflected consistently across every section of the
+# Reports page, not just one chart.
+
+def report_overview(db: Session, organization_id: uuid.UUID, **filters) -> dict:
+    """Org-wide counts, honoring whatever filters the Reports page has set."""
+    tickets = get_tickets(db, organization_id, include_subtasks=False, **filters)
+
+    by_status = {s.value: 0 for s in models.TicketStatus}
+    for t in tickets:
+        by_status[t.status.value] += 1
+
+    done = [t for t in tickets if t.status == models.TicketStatus.DONE]
+    return {
+        "total_tickets": len(tickets),
+        "by_status": by_status,
+        "total_points": sum(t.story_points or 0 for t in tickets),
+        "completed_points": sum(t.story_points or 0 for t in done),
+    }
+
+
+def report_stale_tickets(db: Session, organization_id: uuid.UUID, days: int = 7, **filters) -> list[dict]:
+    """Open tickets nobody has touched in `days` days — not commented on, not
+    edited, not moved. A finished ticket isn't stale, it's just finished, so
+    Done is excluded regardless of how long ago it was closed.
+
+    "Touched" is read from activity_logs rather than Ticket.updated_at, since
+    a comment doesn't change any column on the ticket row itself — only the
+    activity log sees it.
+    """
+    tickets = get_tickets(db, organization_id, include_subtasks=False, **filters)
+    open_tickets = [t for t in tickets if t.status != models.TicketStatus.DONE]
+    if not open_tickets:
+        return []
+
+    ticket_ids = [t.id for t in open_tickets]
+    last_activity = dict(
+        db.query(models.ActivityLog.ticket_id, func.max(models.ActivityLog.created_at))
+        .filter(models.ActivityLog.ticket_id.in_(ticket_ids))
+        .group_by(models.ActivityLog.ticket_id)
+        .all()
+    )
+
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=days)
+    rows = []
+    for t in open_tickets:
+        last = last_activity.get(t.id) or t.created_at
+        if last <= cutoff:
+            rows.append({
+                "ticket": t,
+                "last_activity_at": last,
+                "days_since_activity": (now - last).days,
+            })
+    rows.sort(key=lambda r: r["last_activity_at"])
+    return rows
+
+
+def report_by_employee(db: Session, organization_id: uuid.UUID, **filters) -> list[dict]:
+    """Per-person progress: what's assigned, what's still open, what's done,
+    and how many points they've actually closed out.
+
+    Everyone in the org is included, even with zero tickets in the filtered
+    window — an empty row is itself the finding (nothing assigned to them
+    right now), not something to hide.
+    """
+    tickets = get_tickets(db, organization_id, include_subtasks=False, **filters)
+    by_user: dict[uuid.UUID, list[models.Ticket]] = {}
+    for t in tickets:
+        if t.assignee_id:
+            by_user.setdefault(t.assignee_id, []).append(t)
+
+    rows = []
+    for user in get_all_users(db, organization_id):
+        assigned = by_user.get(user.id, [])
+        done = [t for t in assigned if t.status == models.TicketStatus.DONE]
+        in_progress = [
+            t for t in assigned
+            if t.status in (models.TicketStatus.IN_PROGRESS, models.TicketStatus.CODE_REVIEW)
+        ]
+        rows.append({
+            "user": user,
+            "assigned_count": len(assigned),
+            "done_count": len(done),
+            "in_progress_count": len(in_progress),
+            "points_completed": sum(t.story_points or 0 for t in done),
+        })
+    rows.sort(key=lambda r: r["assigned_count"], reverse=True)
+    return rows
+
+
+def report_by_label(db: Session, organization_id: uuid.UUID, **filters) -> list[dict]:
+    """Per-label breakdown: how many tickets carry each label in the filtered
+    window, and how many of those are done. A ticket with two labels counts
+    under both — labels aren't mutually exclusive, so neither is this report."""
+    tickets = get_tickets(db, organization_id, include_subtasks=False, **filters)
+
+    rows = []
+    for label in get_labels(db, organization_id):
+        tagged = [t for t in tickets if any(l.id == label.id for l in t.labels)]
+        done = [t for t in tagged if t.status == models.TicketStatus.DONE]
+        rows.append({
+            "label": label,
+            "total_count": len(tagged),
+            "done_count": len(done),
+            "points_total": sum(t.story_points or 0 for t in tagged),
+        })
+    rows.sort(key=lambda r: r["total_count"], reverse=True)
+    return rows
+
+
 def velocity(db: Session, organization_id: uuid.UUID) -> dict:
     sprints = sorted(get_sprints(db, organization_id), key=lambda s: (s.start_date or date.min, s.created_at))
 
@@ -1314,6 +1428,8 @@ def get_tickets(
     reporter_id: Optional[uuid.UUID] = None,
     include_subtasks: bool = False,
     search: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
 ) -> list[models.Ticket]:
     query = _ticket_query(db, organization_id)
 
@@ -1347,6 +1463,13 @@ def get_tickets(
         query = query.filter(models.Ticket.created_by_id == reporter_id)
     if client_name:
         query = query.filter(models.Ticket.client_name.ilike(f"%{client_name}%"))
+    # Report windows filter on WHEN THE TICKET WAS RAISED, not last touched --
+    # "show me everything from last month" means everything that existed then,
+    # not everything someone happened to edit then.
+    if date_from is not None:
+        query = query.filter(models.Ticket.created_at >= date_from)
+    if date_to is not None:
+        query = query.filter(models.Ticket.created_at < date_to + timedelta(days=1))
     if search:
         term = f"%{search}%"
         # Title, description, and the ticket key — support engineers paste keys.

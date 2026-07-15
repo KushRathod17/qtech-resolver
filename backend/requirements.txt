@@ -16,3 +16,7 @@ python-dotenv==1.0.1
 # app/storage.py) -- only imported if S3_* env vars are set, but always
 # installed so a fresh prod deploy never fails on a missing dependency.
 boto3==1.35.36
+# Pure-Python PDF generation for the Reports page's "Export PDF" button
+# (app/pdf_report.py) -- no system-level dependency (unlike wkhtmltopdf/weasyprint),
+# so it works unmodified on Render's free tier.
+reportlab==4.2.5

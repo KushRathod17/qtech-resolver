@@ -108,6 +108,32 @@ export const labelsApi = {
   remove: (id) => apiClient.delete(`/labels/${id}`),
 };
 
+/** Strip empty/undefined values so axios doesn't send `?product=&label_id=`. */
+function cleanParams(params = {}) {
+  return Object.fromEntries(Object.entries(params).filter(([, v]) => v !== "" && v != null));
+}
+
+export const reportsApi = {
+  // filters: { date_from, date_to, assignee_id, label_id, product, current_team_id }
+  overview: (filters = {}) =>
+    apiClient.get("/reports/overview", { params: cleanParams(filters) }).then((r) => r.data),
+  stale: (filters = {}, days = 7) =>
+    apiClient
+      .get("/reports/stale", { params: cleanParams({ ...filters, days }) })
+      .then((r) => r.data),
+  byEmployee: (filters = {}) =>
+    apiClient.get("/reports/by-employee", { params: cleanParams(filters) }).then((r) => r.data),
+  byLabel: (filters = {}) =>
+    apiClient.get("/reports/by-label", { params: cleanParams(filters) }).then((r) => r.data),
+  // Same filter set, rendered server-side as a PDF for handing off to
+  // someone who just wants a snapshot, not a live page.
+  exportPdfUrl: (filters = {}, days = 7) => {
+    const params = new URLSearchParams(cleanParams({ ...filters, days }));
+    const qs = params.toString();
+    return `/reports/export${qs ? `?${qs}` : ""}`;
+  },
+};
+
 export const sprintsApi = {
   list: () => apiClient.get("/sprints/").then((r) => r.data),
   create: (payload) => apiClient.post("/sprints/", payload).then((r) => r.data),
