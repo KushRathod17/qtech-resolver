@@ -88,7 +88,9 @@ services:
   - type: web
     name: qtech-resolver-frontend
     runtime: static
-    plan: free
+    # No `plan` field here -- static sites are served from a CDN, not a
+    # compute instance, so there's no instance-type tier to pick; they're
+    # simply free.
     rootDir: frontend
     buildFilter:
       paths:
