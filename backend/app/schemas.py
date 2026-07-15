@@ -5,9 +5,51 @@ from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 from .models import (
-    UserRole, TicketStatus, TicketPriority, TicketType, SprintState,
-    TeamKind, HandoffAction,
+    UserRole, TicketStatus, TicketPriority, TicketType, TaskCategory, SprintState,
+    TeamKind, HandoffAction, EnvironmentStage,
 )
+
+
+# ---------- Organizations ----------
+class OrganizationSearchResult(BaseModel):
+    """What 'search for your organization' returns -- name and id ONLY.
+    Finding an org this way must never be enough to get in; the join code on
+    SignupJoinOrganization is the actual gate."""
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+
+
+class OrganizationOut(BaseModel):
+    """The admin-only view of your own org, including the join code -- never
+    returned by search."""
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    key_prefix: str
+    join_code: str
+
+
+class SignupNewOrganization(BaseModel):
+    """Becomes a brand-new, empty workspace with this person as its admin."""
+    email: EmailStr
+    full_name: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=8, max_length=72)
+    organization_name: str = Field(min_length=2, max_length=80)
+    # The prefix on every ticket key this org creates, e.g. "QTR" -> QTR-1.
+    # Letters/digits only, must start with a letter.
+    key_prefix: str = Field(min_length=2, max_length=8, pattern=r"^[A-Za-z][A-Za-z0-9]*$")
+
+
+class SignupJoinOrganization(BaseModel):
+    """Joins an org someone else already created. organization_id comes from
+    picking a result out of the search endpoint; join_code is the actual
+    secret the person has to be handed out-of-band."""
+    email: EmailStr
+    full_name: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=8, max_length=72)
+    organization_id: uuid.UUID
+    join_code: str = Field(min_length=1, max_length=40)
 
 
 # ---------- Users ----------
@@ -190,40 +232,34 @@ class WorkflowProfileOut(BaseModel):
     history: list[ProfileHistoryRow]
 
 
-# ---------- Components ----------
-class ComponentCreate(BaseModel):
+# ---------- Parent Tags (grouping; replaces Epics) ----------
+class ParentTagCreate(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     description: Optional[str] = Field(default=None, max_length=300)
-    color: str = Field(default="#3E7BFA", pattern=HEX_COLOR)
-    lead_id: Optional[uuid.UUID] = None
+    color: str = Field(default="#8B5CF6", pattern=HEX_COLOR)
 
 
-class ComponentUpdate(BaseModel):
+class ParentTagUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=60)
     description: Optional[str] = Field(default=None, max_length=300)
     color: Optional[str] = Field(default=None, pattern=HEX_COLOR)
-    lead_id: Optional[uuid.UUID] = None
 
 
-class ComponentOut(BaseModel):
+class ParentTagOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     name: str
     description: Optional[str]
     color: str
-    lead: Optional[UserOut] = None
 
 
-class ComponentStats(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: uuid.UUID
-    name: str
-    description: Optional[str]
-    color: str
-    lead: Optional[UserOut] = None
-    open_tickets: int
+class ParentTagStats(ParentTagOut):
+    """A parent tag with its rolled-up numbers, for the management screen."""
     total_tickets: int
-    breached: int
+    done_tickets: int
+    percent: int
+    # Every label used across the grouped tickets, aggregated.
+    labels: list["LabelOut"] = []
 
 
 # ---------- SLA ----------
@@ -258,7 +294,7 @@ class ContributionTicket(BaseModel):
     status: TicketStatus
     priority: TicketPriority
     ticket_type: TicketType
-    component: Optional[ComponentOut] = None
+    product: Optional[str] = None
     client_name: Optional[str] = None
     assignee: Optional[UserOut] = None
     # When they made their contribution to this ticket (the fix/verify handoff,
@@ -415,14 +451,30 @@ class TicketCreate(BaseModel):
     status: TicketStatus = TicketStatus.TODO
     priority: TicketPriority = TicketPriority.MEDIUM
     ticket_type: TicketType = TicketType.TASK
+    # Only meaningful when ticket_type == TASK (the UI hides it for Bug).
+    task_category: Optional[TaskCategory] = None
     story_points: Optional[int] = Field(default=None, ge=0, le=100)
+    product: Optional[str] = Field(default=None, max_length=60)
     assignee_id: Optional[uuid.UUID] = None
     sprint_id: Optional[uuid.UUID] = None
-    epic_id: Optional[uuid.UUID] = None
+    parent_tag_id: Optional[uuid.UUID] = None
+    # Link under an EXISTING TICKET directly -- no separate "create a tag
+    # first" step. The server finds or creates the Parent Tag backing that
+    # ticket (reusing its id) and resolves this into parent_tag_id. If both
+    # this and parent_tag_id are sent, this one wins.
+    parent_ticket_id: Optional[uuid.UUID] = None
     parent_id: Optional[uuid.UUID] = None
-    component_id: Optional[uuid.UUID] = None
     client_name: Optional[str] = Field(default=None, max_length=120)
+    start_date: Optional[date] = None
     due_date: Optional[datetime] = None
+    # Rich bug-report fields — meaningful when ticket_type == BUG. The UI hides
+    # them for Task, but nothing stops a Task from carrying one; the server
+    # doesn't police it, that's a display convention, not a data rule.
+    steps_to_reproduce: Optional[str] = Field(default=None, max_length=4000)
+    expected_behavior: Optional[str] = Field(default=None, max_length=2000)
+    actual_behavior: Optional[str] = Field(default=None, max_length=2000)
+    environment_stage: Optional[EnvironmentStage] = None
+    browser_version: Optional[str] = Field(default=None, max_length=120)
     label_ids: list[uuid.UUID] = Field(default_factory=list)
 
     # Cross-team workflow: send this to a specific person on a specific team at
@@ -438,14 +490,24 @@ class TicketUpdate(BaseModel):
     status: Optional[TicketStatus] = None
     priority: Optional[TicketPriority] = None
     ticket_type: Optional[TicketType] = None
+    task_category: Optional[TaskCategory] = None
     story_points: Optional[int] = Field(default=None, ge=0, le=100)
+    product: Optional[str] = Field(default=None, max_length=60)
     assignee_id: Optional[uuid.UUID] = None
     sprint_id: Optional[uuid.UUID] = None
-    epic_id: Optional[uuid.UUID] = None
+    parent_tag_id: Optional[uuid.UUID] = None
+    # Same as on TicketCreate: link under an existing ticket directly, server
+    # resolves it to parent_tag_id. Wins over parent_tag_id if both are sent.
+    parent_ticket_id: Optional[uuid.UUID] = None
     parent_id: Optional[uuid.UUID] = None
-    component_id: Optional[uuid.UUID] = None
     client_name: Optional[str] = Field(default=None, max_length=120)
+    start_date: Optional[date] = None
     due_date: Optional[datetime] = None
+    steps_to_reproduce: Optional[str] = Field(default=None, max_length=4000)
+    expected_behavior: Optional[str] = Field(default=None, max_length=2000)
+    actual_behavior: Optional[str] = Field(default=None, max_length=2000)
+    environment_stage: Optional[EnvironmentStage] = None
+    browser_version: Optional[str] = Field(default=None, max_length=120)
     # Omit to leave labels untouched; pass [] to clear them.
     label_ids: Optional[list[uuid.UUID]] = None
 
@@ -477,8 +539,9 @@ class TicketBulkUpdate(BaseModel):
     clear_assignee: bool = False
     sprint_id: Optional[uuid.UUID] = None
     clear_sprint: bool = False
-    component_id: Optional[uuid.UUID] = None
-    clear_component: bool = False
+    parent_tag_id: Optional[uuid.UUID] = None
+    clear_parent_tag: bool = False
+    product: Optional[str] = Field(default=None, max_length=60)
     client_name: Optional[str] = Field(default=None, max_length=120)
 
     add_label_ids: list[uuid.UUID] = Field(default_factory=list)
@@ -542,15 +605,6 @@ class SubtaskOut(BaseModel):
     assignee: Optional[UserOut]
 
 
-class EpicProgress(BaseModel):
-    """'6/10 done' — computed from the epic's children, never stored."""
-    done: int
-    total: int
-    points_done: int
-    points_total: int
-    percent: int
-
-
 class TicketOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -561,22 +615,29 @@ class TicketOut(BaseModel):
     status: TicketStatus
     priority: TicketPriority
     ticket_type: TicketType
+    task_category: Optional[TaskCategory]
     story_points: Optional[int]
+    product: Optional[str]
+    start_date: Optional[date]
     due_date: Optional[datetime]
+    steps_to_reproduce: Optional[str]
+    expected_behavior: Optional[str]
+    actual_behavior: Optional[str]
+    environment_stage: Optional[EnvironmentStage]
+    browser_version: Optional[str]
     rank: float
     # Nested so the board can render an avatar and label chips from one request
     assignee: Optional[UserOut]
     reporter: Optional[UserOut]
     labels: list[LabelOut]
-    component: Optional[ComponentOut]
     client_name: Optional[str]
+    parent_tag: Optional[ParentTagOut]
     # Which team is holding it right now (null = not in the cross-team workflow).
     current_team: Optional[TeamOut] = None
     # What the CURRENT VIEWER may do to it. Empty when it isn't theirs to act on.
     available_actions: list[AvailableAction] = []
     handoff_count: int = 0
     sprint_id: Optional[uuid.UUID]
-    epic_id: Optional[uuid.UUID]
     parent_id: Optional[uuid.UUID]
     subtasks: list[SubtaskOut] = []
     watchers: list[UserOut] = []
@@ -585,8 +646,6 @@ class TicketOut(BaseModel):
     # Computed per request, not stored — see SLAOut. None when this priority
     # has no SLA configured.
     sla: Optional[SLAOut] = None
-    # Only populated on tickets of type=epic.
-    progress: Optional[EpicProgress] = None
     created_at: datetime
     updated_at: datetime
 

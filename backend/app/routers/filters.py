@@ -14,7 +14,8 @@ router = APIRouter(prefix="/filters", tags=["saved filters"])
 # query, so an unbounded dict would let anything be smuggled through.
 ALLOWED_KEYS = {
     "search", "status", "assignee_id", "priority", "ticket_type",
-    "label_id", "component_id", "client_name", "sprint_id", "breached", "watching",
+    "label_id", "product", "client_name", "sprint_id", "current_team_id",
+    "breached", "watching",
 }
 
 
@@ -39,7 +40,7 @@ def create_filter(
     payload.query = _clean(payload.query)
     if not payload.query:
         raise HTTPException(status_code=400, detail="That filter is empty — set some filters first")
-    return crud.create_saved_filter(db, current_user.id, payload)
+    return crud.create_saved_filter(db, current_user.id, current_user.organization_id, payload)
 
 
 def _own(db: Session, filter_id: uuid.UUID, user: User):

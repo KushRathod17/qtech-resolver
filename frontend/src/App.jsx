@@ -9,13 +9,13 @@ import Reports from "./pages/Reports";
 import Sprints from "./pages/Sprints";
 import Settings from "./pages/Settings";
 import Profile from "./pages/Profile";
-import Components from "./pages/Components";
+import ParentTags from "./pages/ParentTags";
+import Issues from "./pages/Issues";
 import Backlog from "./pages/Backlog";
 import Workflow from "./pages/Workflow";
 import People from "./pages/People";
 import MyTickets from "./pages/MyTickets";
 import ChangePassword from "./pages/ChangePassword";
-import Placeholder from "./pages/Placeholder";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading, user } = useAuth();
@@ -50,17 +50,8 @@ function AppRoutes() {
         <Route path="/people" element={<People />} />
         <Route path="/my-tickets" element={<MyTickets />} />
         <Route path="/sprints" element={<Sprints />} />
-        <Route path="/components" element={<Components />} />
-        <Route
-          path="/issues"
-          element={
-            <Placeholder
-              title="Issues"
-              blurb="A flat, filterable, sortable table of every ticket — for when the board isn't the right shape."
-              planned={["Sortable table view", "Saved filters", "Bulk edit across a selection"]}
-            />
-          }
-        />
+        <Route path="/parent-tags" element={<ParentTags />} />
+        <Route path="/issues" element={<Issues />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/profile/:id" element={<Profile />} />
       </Route>

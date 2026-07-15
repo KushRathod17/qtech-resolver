@@ -14,7 +14,6 @@ import {
   ticketsApi,
   sprintsApi,
   usersApi,
-  componentsApi,
   errorMessage,
 } from "../api/resources";
 import {
@@ -23,6 +22,7 @@ import {
   Avatar,
   PRIORITY_LABELS,
   TYPE_LABELS,
+  PRODUCTS,
 } from "../board/constants";
 import SlaBadge from "../components/SlaBadge";
 
@@ -55,14 +55,7 @@ function BacklogRow({ ticket }) {
       <span className="ticket-id">{ticket.key}</span>
       <span className="backlog-title">{ticket.title}</span>
 
-      {ticket.component && (
-        <span
-          className="component-chip"
-          style={{ borderColor: ticket.component.color, color: ticket.component.color }}
-        >
-          {ticket.component.name}
-        </span>
-      )}
+      {ticket.product && <span className="product-chip">{ticket.product}</span>}
       {ticket.client_name && <span className="client-tag">{ticket.client_name}</span>}
 
       <SlaBadge sla={ticket.sla} compact />
@@ -94,29 +87,26 @@ export default function Backlog() {
   const [tickets, setTickets] = useState([]);
   const [sprints, setSprints] = useState([]);
   const [users, setUsers] = useState([]);
-  const [components, setComponents] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(null);
 
   const [sortKey, setSortKey] = useState("priority");
-  const [filters, setFilters] = useState({ component_id: "", assignee_id: "", search: "" });
+  const [filters, setFilters] = useState({ product: "", assignee_id: "", search: "" });
 
   const load = useCallback(async () => {
     try {
       setError("");
       // The backlog is unstarted work: nothing anyone has picked up yet.
-      const [backlog, sprintList, people, comps] = await Promise.all([
+      const [backlog, sprintList, people] = await Promise.all([
         ticketsApi.list({ status: "backlog" }),
         sprintsApi.list(),
         usersApi.list(),
-        componentsApi.list(),
       ]);
       setTickets(backlog);
       setSprints(sprintList);
       setUsers(people);
-      setComponents(comps);
     } catch (err) {
       setError(errorMessage(err, "Couldn't load the backlog."));
     } finally {
@@ -133,7 +123,7 @@ export default function Backlog() {
   const visible = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
     return tickets
-      .filter((t) => !filters.component_id || t.component?.id === filters.component_id)
+      .filter((t) => !filters.product || t.product === filters.product)
       .filter((t) => !filters.assignee_id || t.assignee?.id === filters.assignee_id)
       .filter(
         (t) =>
@@ -186,13 +176,13 @@ export default function Backlog() {
           />
           <select
             className="filter-select"
-            value={filters.component_id}
-            onChange={(e) => setFilters((f) => ({ ...f, component_id: e.target.value }))}
-            aria-label="Filter by component"
+            value={filters.product}
+            onChange={(e) => setFilters((f) => ({ ...f, product: e.target.value }))}
+            aria-label="Filter by product"
           >
-            <option value="">All components</option>
-            {components.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
+            <option value="">All products</option>
+            {PRODUCTS.map((p) => (
+              <option key={p} value={p}>{p}</option>
             ))}
           </select>
           <select

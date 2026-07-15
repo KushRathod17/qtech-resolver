@@ -16,7 +16,7 @@ def list_comments(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return crud.get_comments_for_ticket(db, ticket_id)
@@ -29,7 +29,7 @@ def add_comment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return crud.create_comment(db, ticket_id, current_user.id, payload)
+    return crud.create_comment(db, ticket, current_user.id, payload)

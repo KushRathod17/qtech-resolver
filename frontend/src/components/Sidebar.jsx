@@ -11,7 +11,7 @@ const NAV = [
   { to: "/people", label: "People", icon: "☺" },
   { to: "/reports", label: "Reports", icon: "◔" },
   { to: "/sprints", label: "Sprints", icon: "⚑" },
-  { to: "/components", label: "Components", icon: "◇" },
+  { to: "/parent-tags", label: "Parent Tags", icon: "◈" },
   { to: "/issues", label: "Issues", icon: "⊙" },
   { to: "/settings", label: "Settings", icon: "⚙" },
 ];

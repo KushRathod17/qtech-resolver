@@ -16,7 +16,7 @@ router = APIRouter(prefix="/teams", tags=["teams"])
 
 @router.get("/", response_model=list[TeamOut])
 def list_teams(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return crud.get_teams(db)
+    return crud.get_teams(db, current_user.organization_id)
 
 
 @router.post("/", response_model=TeamOut, status_code=status.HTTP_201_CREATED)
@@ -25,9 +25,9 @@ def create_team(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
 ):
-    if crud.get_team_by_name(db, payload.name):
+    if crud.get_team_by_name(db, payload.name, current_user.organization_id):
         raise HTTPException(status_code=400, detail="A team with that name already exists")
-    return crud.create_team(db, payload)
+    return crud.create_team(db, payload, current_user.organization_id)
 
 
 @router.get("/{team_id}/members", response_model=list[TeamMemberOut])
@@ -39,9 +39,10 @@ def list_team_members(
     """Populates the 'pick a person from that team' dropdown — WITH each
     candidate's open-ticket count, so the choice is informed at the only moment
     it can change: while you're making it."""
-    if not crud.get_team(db, team_id):
+    if not crud.get_team(db, team_id, current_user.organization_id):
         raise HTTPException(status_code=404, detail="Team not found")
-    return crud.attach_workloads(db, crud.get_team_members(db, team_id))
+    members = crud.get_team_members(db, team_id, current_user.organization_id)
+    return crud.attach_workloads(db, members, current_user.organization_id)
 
 
 @router.patch("/{team_id}", response_model=TeamOut)
@@ -51,12 +52,12 @@ def update_team(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
 ):
-    team = crud.get_team(db, team_id)
+    team = crud.get_team(db, team_id, current_user.organization_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
 
     if payload.name:
-        clash = crud.get_team_by_name(db, payload.name)
+        clash = crud.get_team_by_name(db, payload.name, current_user.organization_id)
         if clash and clash.id != team.id:
             raise HTTPException(status_code=400, detail="A team with that name already exists")
 
@@ -69,13 +70,16 @@ def delete_team(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
 ):
-    team = crud.get_team(db, team_id)
+    team = crud.get_team(db, team_id, current_user.organization_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
 
     # Tickets mid-flight would lose the team currently holding them, stranding
     # the chain with nobody able to act.
-    holding = [r for r in crud.workflow_report(db) if r["current_team"] and r["current_team"].id == team_id]
+    holding = [
+        r for r in crud.workflow_report(db, current_user.organization_id)
+        if r["current_team"] and r["current_team"].id == team_id
+    ]
     if holding:
         raise HTTPException(
             status_code=400,
@@ -96,7 +100,7 @@ def workflow_report(
 ):
     """Every ticket in the workflow: where it is, how far it's travelled, and
     how long it's been sitting where it is."""
-    return crud.workflow_report(db)
+    return crud.workflow_report(db, current_user.organization_id)
 
 
 @reports_router.get("/team-holding-times", response_model=list[TeamHoldingTime])
@@ -106,4 +110,4 @@ def team_holding_times(
 ):
     """Average time each team holds a ticket before handing it on — i.e. who is
     the bottleneck."""
-    return crud.team_holding_times(db)
+    return crud.team_holding_times(db, current_user.organization_id)

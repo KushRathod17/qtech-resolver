@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 
-import { labelsApi, slaApi, teamsApi, errorMessage } from "../api/resources";
+import { labelsApi, slaApi, teamsApi, organizationsApi, errorMessage } from "../api/resources";
 import { useAuth } from "../context/AuthContext";
 import { PRIORITY_LABELS, PriorityIcon } from "../board/constants";
 
@@ -357,9 +357,92 @@ function SlaPanel({ canManage }) {
   );
 }
 
+function OrganizationPanel() {
+  const [org, setOrg] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [rotating, setRotating] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    organizationsApi
+      .mine()
+      .then(setOrg)
+      .catch((err) => setError(errorMessage(err, "Couldn't load your organization.")))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function handleRotate() {
+    if (!window.confirm("Rotate the join code? The old code stops working immediately — anyone mid-signup will need the new one.")) {
+      return;
+    }
+    setRotating(true);
+    setError("");
+    try {
+      setOrg(await organizationsApi.rotateJoinCode());
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't rotate the join code."));
+    } finally {
+      setRotating(false);
+    }
+  }
+
+  function copyCode() {
+    if (!org) return;
+    navigator.clipboard?.writeText(org.join_code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <section className="settings-panel">
+      <div className="settings-panel-head">
+        <h3>Organization</h3>
+        <p className="chart-sub">
+          Share this join code with people who should sign up under {org?.name || "your organization"} — it's
+          the only way in besides being added directly on People. Anyone can find your org by name, but the
+          code is the actual gate.
+        </p>
+      </div>
+
+      {error && <div className="banner-error" role="alert">{error}</div>}
+
+      {loading ? (
+        <p className="empty-state">Loading…</p>
+      ) : org ? (
+        <>
+          <ul className="settings-list">
+            <li className="settings-row">
+              <span className="settings-row-name">
+                <strong>{org.name}</strong>
+                <span className="settings-row-sub">Ticket keys: {org.key_prefix}-1, {org.key_prefix}-2…</span>
+              </span>
+            </li>
+            <li className="settings-row">
+              <span className="settings-row-name">
+                <strong style={{ fontFamily: "monospace", letterSpacing: 1 }}>{org.join_code}</strong>
+                <span className="settings-row-sub">Join code</span>
+              </span>
+              <button type="button" className="btn-secondary" onClick={copyCode}>
+                {copied ? "Copied!" : "Copy"}
+              </button>
+              <button type="button" className="btn-secondary" onClick={handleRotate} disabled={rotating}>
+                {rotating ? "Rotating…" : "Rotate"}
+              </button>
+            </li>
+          </ul>
+        </>
+      ) : (
+        <p className="empty-state">Couldn't load organization details.</p>
+      )}
+    </section>
+  );
+}
+
 export default function Settings() {
   const { user } = useAuth();
   const canManage = user?.role === "admin" || user?.role === "manager";
+  const isAdmin = user?.role === "admin";
 
   const [teams, setTeams] = useState([]);
   const [teamsError, setTeamsError] = useState("");
@@ -386,6 +469,7 @@ export default function Settings() {
       {teamsError && <div className="banner-error" role="alert">{teamsError}</div>}
 
       <div className="settings-grid">
+        {isAdmin && <OrganizationPanel />}
         <TeamsPanel canManage={canManage} teams={teams} setTeams={setTeams} />
         <LabelsPanel canManage={canManage} />
         <SlaPanel canManage={canManage} />

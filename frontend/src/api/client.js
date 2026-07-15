@@ -1,7 +1,10 @@
 import axios from "axios";
 
+// Set VITE_API_URL at build time in production (Render injects it from the
+// service's env vars during `npm run build`); falls back to the local
+// backend for `npm run dev`.
 const apiClient = axios.create({
-  baseURL: "http://127.0.0.1:8000",
+  baseURL: import.meta.env.VITE_API_URL || "http://127.0.0.1:8000",
 });
 
 apiClient.interceptors.request.use((config) => {

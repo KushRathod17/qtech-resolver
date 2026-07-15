@@ -37,17 +37,33 @@ export function AuthProvider({ children }) {
     setToken(data.access_token);
   };
 
-  const register = async (fullName, email, password) => {
-    // Deliberately no `role` in this payload. The server assigns it (first
-    // account becomes admin, everyone after is a developer); accepting a role
-    // from the client is exactly the privilege-escalation hole we closed.
-    await apiClient.post("/auth/register", {
+  // Both signup paths return a token directly -- no separate login round trip
+  // needed. Deliberately no `role` in either payload: the server decides
+  // (first person in an org is its admin, everyone after is a developer):
+  // accepting a role from the client is the privilege-escalation hole that
+  // used to exist here.
+  const signupNewOrganization = async ({ fullName, email, password, organizationName, keyPrefix }) => {
+    const { data } = await apiClient.post("/auth/signup/organization", {
       full_name: fullName,
       email,
       password,
+      organization_name: organizationName,
+      key_prefix: keyPrefix,
     });
-    // Registration doesn't return a token, so sign in with the same credentials.
-    await login(email, password);
+    localStorage.setItem("access_token", data.access_token);
+    setToken(data.access_token);
+  };
+
+  const signupJoinOrganization = async ({ fullName, email, password, organizationId, joinCode }) => {
+    const { data } = await apiClient.post("/auth/signup/join", {
+      full_name: fullName,
+      email,
+      password,
+      organization_id: organizationId,
+      join_code: joinCode,
+    });
+    localStorage.setItem("access_token", data.access_token);
+    setToken(data.access_token);
   };
 
   // Called after a profile edit so the top-bar avatar/name update without a reload.
@@ -68,7 +84,11 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ token, user, isAuthenticated: !!token, login, register, logout, refreshUser, loading }}
+      value={{
+        token, user, isAuthenticated: !!token, login,
+        signupNewOrganization, signupJoinOrganization,
+        logout, refreshUser, loading,
+      }}
     >
       {children}
     </AuthContext.Provider>

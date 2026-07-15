@@ -17,8 +17,11 @@ class Settings(BaseSettings):
     # attachment. For a tool holding travel-agency customer data that is a
     # confidentiality breach, not a convenience.
     #
-    # The very first account is always allowed regardless, or a fresh install
-    # could never be bootstrapped.
+    # This only gates JOINING an existing organization (POST /auth/signup/join).
+    # Starting a brand-new organization (POST /auth/signup/organization) is
+    # never domain-gated -- there's nothing to protect yet, since the org
+    # doesn't exist until that call creates it. That's how a fresh install (or
+    # a new customer's workspace) gets bootstrapped.
     ALLOWED_SIGNUP_DOMAINS: str = ""
 
     # Failed logins allowed from one IP (or against one email) before the door
@@ -26,6 +29,17 @@ class Settings(BaseSettings):
     # `password123` are brute-forceable in seconds.
     LOGIN_MAX_ATTEMPTS: int = 8
     LOGIN_LOCKOUT_SECONDS: int = 900  # 15 minutes
+
+    # Object storage for ticket attachments and avatars. Leave all four blank
+    # to use local disk (the default -- fine for local dev and for a host with
+    # a persistent disk). Set all four to point uploads at any S3-compatible
+    # bucket instead -- required on a free-tier host, since its filesystem is
+    # wiped on every deploy/restart. See app/storage.py.
+    S3_ENDPOINT_URL: str = ""
+    S3_ACCESS_KEY_ID: str = ""
+    S3_SECRET_ACCESS_KEY: str = ""
+    S3_BUCKET_NAME: str = ""
+    S3_REGION: str = "auto"
 
     @property
     def cors_origins_list(self) -> list[str]:

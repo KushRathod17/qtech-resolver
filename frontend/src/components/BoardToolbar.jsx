@@ -1,11 +1,10 @@
-import { Avatar, PRIORITIES, PRIORITY_LABELS, TICKET_TYPES, TYPE_LABELS } from "../board/constants";
+import { Avatar, PRIORITIES, PRIORITY_LABELS, TICKET_TYPES, TYPE_LABELS, PRODUCTS } from "../board/constants";
 
 export default function BoardToolbar({
   filters,
   setFilters,
   users,
   labels,
-  components = [],
   teams = [],
   savedFilters = [],
   onSaveFilter,
@@ -23,7 +22,7 @@ export default function BoardToolbar({
     filters.label_id ||
     filters.priority ||
     filters.ticket_type ||
-    filters.component_id ||
+    filters.product ||
     filters.current_team_id ||
     filters.breached ||
     filters.watching;
@@ -115,17 +114,17 @@ export default function BoardToolbar({
           </select>
         )}
 
-        {/* Component first — on a queue spanning several products, "which
+        {/* Product first — on a queue spanning several products, "which
             product?" is the question people filter by most. */}
         <select
           className="filter-select"
-          value={filters.component_id}
-          onChange={set("component_id")}
-          aria-label="Filter by component"
+          value={filters.product}
+          onChange={set("product")}
+          aria-label="Filter by product"
         >
-          <option value="">All components</option>
-          {components.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
+          <option value="">All products</option>
+          {PRODUCTS.map((p) => (
+            <option key={p} value={p}>{p}</option>
           ))}
         </select>
 
@@ -191,7 +190,7 @@ export default function BoardToolbar({
                 label_id: "",
                 priority: "",
                 ticket_type: "",
-                component_id: "",
+                product: "",
                 current_team_id: "",
                 breached: "",
                 watching: "",

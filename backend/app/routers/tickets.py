@@ -13,11 +13,9 @@ from ..schemas import (
     HandoffCreate, HandoffOut,
 )
 from .. import crud, workflow
+from ..storage import storage
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
-
-ATTACHMENT_DIR = Path(__file__).resolve().parent.parent.parent / "uploads" / "attachments"
-ATTACHMENT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Anything bigger belongs in a file share with a link pasted in a comment.
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -32,7 +30,7 @@ def bulk_update_tickets(
 ):
     """Apply one change set to many tickets in a single transaction."""
     try:
-        updated = crud.bulk_update_tickets(db, payload, actor_id=current_user.id)
+        updated = crud.bulk_update_tickets(db, current_user.organization_id, payload, actor_id=current_user.id)
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err))
     if not updated:
@@ -46,7 +44,7 @@ def bulk_delete_tickets(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
 ):
-    deleted = crud.bulk_delete_tickets(db, payload.ticket_ids)
+    deleted = crud.bulk_delete_tickets(db, current_user.organization_id, payload.ticket_ids)
     return {"deleted": deleted}
 
 
@@ -57,9 +55,9 @@ def list_tickets(
     priority: Optional[TicketPriority] = Query(default=None),
     ticket_type: Optional[TicketType] = Query(default=None),
     sprint_id: Optional[uuid.UUID] = Query(default=None),
-    epic_id: Optional[uuid.UUID] = Query(default=None),
+    parent_tag_id: Optional[uuid.UUID] = Query(default=None),
     label_id: Optional[uuid.UUID] = Query(default=None),
-    component_id: Optional[uuid.UUID] = Query(default=None),
+    product: Optional[str] = Query(default=None),
     client_name: Optional[str] = Query(default=None),
     current_team_id: Optional[uuid.UUID] = Query(
         default=None, description="What's sitting in this team right now"
@@ -73,14 +71,15 @@ def list_tickets(
 ):
     tickets = crud.get_tickets(
         db,
+        current_user.organization_id,
         status=status,
         assignee_id=assignee_id,
         priority=priority,
         ticket_type=ticket_type,
         sprint_id=sprint_id,
-        epic_id=epic_id,
+        parent_tag_id=parent_tag_id,
         label_id=label_id,
-        component_id=component_id,
+        product=product,
         client_name=client_name,
         current_team_id=current_team_id,
         breached=breached,
@@ -91,23 +90,13 @@ def list_tickets(
     return crud.attach_workflow(db, tickets, current_user)
 
 
-@router.get("/epics", response_model=list[TicketOut])
-def list_epics(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Every epic, each carrying its computed progress. Declared before
-    /{ticket_id} so "epics" isn't parsed as a UUID."""
-    return crud.get_tickets(db, ticket_type=TicketType.EPIC)
-
-
 @router.get("/clients", response_model=list[str])
 def list_clients(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Distinct client names, for autocomplete. Declared before /{ticket_id}."""
-    return crud.get_client_names(db)
+    return crud.get_client_names(db, current_user.organization_id)
 
 
 @router.post("/", response_model=TicketOut, status_code=status.HTTP_201_CREATED)
@@ -116,11 +105,14 @@ def create_ticket(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ticket = crud.create_ticket(db, payload, created_by_id=current_user.id)
+    try:
+        ticket = crud.create_ticket(db, payload, created_by_id=current_user.id, organization_id=current_user.organization_id)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
 
     # Routed into the cross-team workflow at the moment it's raised.
     if payload.route_to_user_id:
-        target = crud.get_user(db, payload.route_to_user_id)
+        target = crud.get_user(db, payload.route_to_user_id, current_user.organization_id)
         if not target:
             raise HTTPException(status_code=400, detail="That person doesn't exist")
         if not target.team_id:
@@ -139,7 +131,7 @@ def get_ticket(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return crud.attach_workflow(db, [ticket], current_user)[0]
@@ -152,7 +144,7 @@ def update_ticket(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     try:
@@ -170,7 +162,7 @@ def move_ticket(
     current_user: User = Depends(get_current_user),
 ):
     """Drag-and-drop: change column and/or position within a column."""
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     try:
@@ -185,7 +177,7 @@ def delete_ticket(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
 ):
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     crud.delete_ticket(db, ticket)
@@ -198,16 +190,11 @@ def add_subtask(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    parent = crud.get_ticket(db, ticket_id)
+    parent = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not parent:
         raise HTTPException(status_code=404, detail="Ticket not found")
     if parent.parent_id:
         raise HTTPException(status_code=400, detail="A sub-task can't have sub-tasks of its own")
-    if parent.ticket_type == TicketType.EPIC:
-        raise HTTPException(
-            status_code=400,
-            detail="Epics group tickets, not sub-tasks. Set this ticket's epic instead.",
-        )
     return crud.create_subtask(db, parent, payload, created_by_id=current_user.id)
 
 
@@ -219,28 +206,10 @@ def duplicate_ticket(
 ):
     """Copy everything except the history. The same OTRAMS booking bug gets
     reported by five agencies in a week; retyping it five times is the tax."""
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    return crud.duplicate_ticket(db, ticket, created_by_id=current_user.id)
-
-
-@router.post("/{ticket_id}/convert-to-epic", response_model=TicketOut)
-def convert_to_epic(
-    ticket_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """A ticket that grew. Its sub-tasks become epic children, since an epic
-    can't own sub-tasks."""
-    ticket = crud.get_ticket(db, ticket_id)
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
-    if ticket.ticket_type == TicketType.EPIC:
-        raise HTTPException(status_code=400, detail="That's already an epic")
-    if ticket.parent_id:
-        raise HTTPException(status_code=400, detail="Detach this sub-task from its parent first")
-    return crud.convert_to_epic(db, ticket, actor_id=current_user.id)
+    return crud.attach_workflow(db, [crud.duplicate_ticket(db, ticket, created_by_id=current_user.id)], current_user)[0]
 
 
 @router.post("/{ticket_id}/watch", response_model=TicketOut)
@@ -249,7 +218,7 @@ def watch_ticket(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return crud.watch_ticket(db, ticket, current_user)
@@ -261,7 +230,7 @@ def unwatch_ticket(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return crud.unwatch_ticket(db, ticket, current_user)
@@ -274,7 +243,7 @@ async def upload_attachment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -292,7 +261,7 @@ async def upload_attachment(
     original = Path(file.filename or "file").name
     suffix = Path(original).suffix[:12]
     stored = f"{uuid.uuid4().hex}{suffix}"
-    (ATTACHMENT_DIR / stored).write_bytes(contents)
+    storage.put(f"attachments/{stored}", contents)
 
     return crud.create_attachment(
         db,
@@ -312,7 +281,7 @@ def delete_attachment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    attachment = crud.get_attachment(db, attachment_id)
+    attachment = crud.get_attachment(db, attachment_id, current_user.organization_id)
     if not attachment or attachment.ticket_id != ticket_id:
         raise HTTPException(status_code=404, detail="Attachment not found")
 
@@ -321,9 +290,7 @@ def delete_attachment(
     if attachment.uploaded_by_id != current_user.id and not privileged:
         raise HTTPException(status_code=403, detail="You can only delete your own attachments")
 
-    stored = ATTACHMENT_DIR / attachment.stored_name
-    if stored.is_file() and stored.parent == ATTACHMENT_DIR:
-        stored.unlink(missing_ok=True)
+    storage.delete(f"attachments/{attachment.stored_name}")
 
     crud.delete_attachment(db, attachment)
 
@@ -340,7 +307,7 @@ def hand_off_ticket(
     Permission is decided by the state machine, NOT by the UI. Hiding a button
     is a courtesy; this is the enforcement.
     """
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
 
@@ -374,7 +341,7 @@ def get_ticket_handoffs(
 ):
     """The full chain of custody: every team, every person, when they received
     it, when they passed it on, how long they held it, and what they said."""
-    if not crud.get_ticket(db, ticket_id):
+    if not crud.get_ticket(db, ticket_id, current_user.organization_id):
         raise HTTPException(status_code=404, detail="Ticket not found")
     return crud.build_timeline(crud.get_handoffs(db, ticket_id))
 
@@ -385,7 +352,7 @@ def get_ticket_activity(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    ticket = crud.get_ticket(db, ticket_id)
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return crud.get_activity_log(db, ticket_id)

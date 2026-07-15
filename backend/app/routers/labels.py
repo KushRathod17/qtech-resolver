@@ -16,7 +16,7 @@ def list_labels(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return crud.get_labels(db)
+    return crud.get_labels(db, current_user.organization_id)
 
 
 @router.post("/", response_model=LabelOut, status_code=status.HTTP_201_CREATED)
@@ -29,12 +29,12 @@ def create_label(
     # carrying the label.
     current_user: User = Depends(get_current_user),
 ):
-    existing = crud.get_label_by_name(db, payload.name)
+    existing = crud.get_label_by_name(db, payload.name, current_user.organization_id)
     if existing:
         # Two people triaging the same incident will both try to create the same
         # label. Hand back the one that exists rather than making them care.
         return existing
-    return crud.create_label(db, payload)
+    return crud.create_label(db, payload, current_user.organization_id)
 
 
 @router.patch("/{label_id}", response_model=LabelOut)
@@ -44,12 +44,12 @@ def update_label(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
 ):
-    label = crud.get_label(db, label_id)
+    label = crud.get_label(db, label_id, current_user.organization_id)
     if not label:
         raise HTTPException(status_code=404, detail="Label not found")
 
     if payload.name:
-        clash = crud.get_label_by_name(db, payload.name)
+        clash = crud.get_label_by_name(db, payload.name, current_user.organization_id)
         if clash and clash.id != label.id:
             raise HTTPException(status_code=400, detail="A label with that name already exists")
 
@@ -62,7 +62,7 @@ def delete_label(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
 ):
-    label = crud.get_label(db, label_id)
+    label = crud.get_label(db, label_id, current_user.organization_id)
     if not label:
         raise HTTPException(status_code=404, detail="Label not found")
     crud.delete_label(db, label)

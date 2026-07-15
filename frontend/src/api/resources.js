@@ -1,7 +1,14 @@
 import apiClient from "./client";
 
+export const organizationsApi = {
+  // Public, unauthenticated -- used on the signup page before there's a token.
+  search: (name) => apiClient.get("/organizations/search", { params: { name } }).then((r) => r.data),
+  mine: () => apiClient.get("/organizations/me").then((r) => r.data),
+  rotateJoinCode: () => apiClient.post("/organizations/me/rotate-join-code").then((r) => r.data),
+};
+
 export const ticketsApi = {
-  // filters: { status, assignee_id, priority, ticket_type, sprint_id, epic_id, label_id, search }
+  // filters: { status, assignee_id, priority, ticket_type, sprint_id, product, label_id, search }
   list: (filters = {}) => {
     const params = Object.fromEntries(
       Object.entries(filters).filter(([, v]) => v !== "" && v != null)
@@ -20,12 +27,10 @@ export const ticketsApi = {
     apiClient.post("/tickets/bulk/delete", { ticket_ids: ticketIds }).then((r) => r.data),
   activity: (id) => apiClient.get(`/tickets/${id}/activity`).then((r) => r.data),
   clients: () => apiClient.get("/tickets/clients").then((r) => r.data),
-  epics: () => apiClient.get("/tickets/epics").then((r) => r.data),
 
   addSubtask: (id, payload) =>
     apiClient.post(`/tickets/${id}/subtasks`, payload).then((r) => r.data),
   duplicate: (id) => apiClient.post(`/tickets/${id}/duplicate`).then((r) => r.data),
-  convertToEpic: (id) => apiClient.post(`/tickets/${id}/convert-to-epic`).then((r) => r.data),
 
   watch: (id) => apiClient.post(`/tickets/${id}/watch`).then((r) => r.data),
   unwatch: (id) => apiClient.delete(`/tickets/${id}/watch`).then((r) => r.data),
@@ -79,13 +84,15 @@ export const workflowApi = {
   holdingTimes: () => apiClient.get("/reports/team-holding-times").then((r) => r.data),
 };
 
-export const componentsApi = {
-  list: () => apiClient.get("/components/").then((r) => r.data),
-  stats: () => apiClient.get("/components/stats").then((r) => r.data),
-  create: (payload) => apiClient.post("/components/", payload).then((r) => r.data),
-  update: (id, payload) => apiClient.patch(`/components/${id}`, payload).then((r) => r.data),
-  remove: (id) => apiClient.delete(`/components/${id}`),
-  tickets: (id) => apiClient.get(`/components/${id}/tickets`).then((r) => r.data),
+export const parentTagsApi = {
+  list: () => apiClient.get("/parent-tags/").then((r) => r.data),
+  // Each tag with its rolled-up ticket count, done-progress, and the labels
+  // aggregated across every ticket grouped under it.
+  stats: () => apiClient.get("/parent-tags/stats").then((r) => r.data),
+  create: (payload) => apiClient.post("/parent-tags/", payload).then((r) => r.data),
+  update: (id, payload) => apiClient.patch(`/parent-tags/${id}`, payload).then((r) => r.data),
+  remove: (id) => apiClient.delete(`/parent-tags/${id}`),
+  tickets: (id) => apiClient.get(`/parent-tags/${id}/tickets`).then((r) => r.data),
 };
 
 export const slaApi = {

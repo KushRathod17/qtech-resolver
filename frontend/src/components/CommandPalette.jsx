@@ -67,9 +67,13 @@ export function scoreItem(query, item) {
 const NAV = [
   { id: "nav-board", label: "Go to Board", to: "/board", hint: "Navigation" },
   { id: "nav-backlog", label: "Go to Backlog", to: "/backlog", hint: "Navigation" },
+  { id: "nav-workflow", label: "Go to Workflow", to: "/workflow", hint: "Navigation" },
+  { id: "nav-people", label: "Go to People", to: "/people", hint: "Navigation" },
+  { id: "nav-my-tickets", label: "Go to My Tickets", to: "/my-tickets", hint: "Navigation" },
   { id: "nav-reports", label: "Go to Reports", to: "/reports", hint: "Navigation" },
   { id: "nav-sprints", label: "Go to Sprints", to: "/sprints", hint: "Navigation" },
-  { id: "nav-components", label: "Go to Components", to: "/components", hint: "Navigation" },
+  // Components was removed in favor of a plain Product field on the ticket.
+  { id: "nav-parent-tags", label: "Go to Parent Tags", to: "/parent-tags", hint: "Navigation" },
   { id: "nav-issues", label: "Go to Issues", to: "/issues", hint: "Navigation" },
   { id: "nav-settings", label: "Go to Settings", to: "/settings", hint: "Navigation" },
 ];
@@ -233,12 +237,31 @@ export default function CommandPalette() {
       return [...commands.slice(0, 3), ...ticketItems.slice(0, 7)];
     }
 
-    return [...commands, ...ticketItems]
+    const scored = [...commands, ...ticketItems]
       .map((i) => ({ i, s: scoreItem(query, i) }))
       .filter((x) => x.s >= 0)
-      .sort((x, y) => y.s - x.s)
-      .slice(0, 12)
-      .map((x) => x.i);
+      .sort((x, y) => y.s - x.s);
+
+    const top = scored.slice(0, 12).map((x) => x.i);
+
+    // The palette only ever shows 12 rows — when a search matches more
+    // tickets than that, the rest shouldn't just be invisible. Issues is the
+    // full, unpaginated, filterable table this same query can be handed to.
+    const totalTicketMatches = scored.filter((x) => x.i.ticket).length;
+    const shownTicketCount = top.filter((i) => i.ticket).length;
+    if (totalTicketMatches > shownTicketCount) {
+      top.push({
+        id: "see-all-issues",
+        label: `See all ${totalTicketMatches} matching tickets in Issues`,
+        hint: "Issues",
+        run: () => {
+          close();
+          navigate(`/issues?search=${encodeURIComponent(query)}`);
+        },
+      });
+    }
+
+    return top;
   }, [subject, query, tickets, users, navigate, close, logout]);
 
   function onKeyDown(e) {

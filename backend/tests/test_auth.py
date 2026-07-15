@@ -1,37 +1,42 @@
 """Auth, roles, and the privilege-escalation hole closed in Slice 0."""
-from tests.conftest import auth
+from tests.conftest import auth, _register, TEST_ORG_NAME, TEST_ORG_JOIN_CODE
+
+
+def _join_payload(client, **overrides):
+    orgs = client.get("/organizations/search", params={"name": TEST_ORG_NAME}).json()
+    payload = {
+        "email": "someone@qtechtest.io",
+        "full_name": "Someone",
+        "password": "password123",
+        "organization_id": orgs[0]["id"],
+        "join_code": TEST_ORG_JOIN_CODE,
+    }
+    payload.update(overrides)
+    return payload
 
 
 def test_first_account_becomes_admin(client):
-    r = client.post(
-        "/auth/register",
-        json={"email": "first@qtechtest.io", "full_name": "First", "password": "password123"},
-    )
-    assert r.status_code == 201
-    assert r.json()["role"] == "admin"
+    """The first person to join a freshly created organization becomes its
+    admin -- there's nobody else yet to have granted them the role."""
+    user = _register(client, "first@qtechtest.io", "First")
+    assert user["role"] == "admin"
 
 
 def test_second_account_is_a_developer(client, admin):
-    r = client.post(
-        "/auth/register",
-        json={"email": "second@qtechtest.io", "full_name": "Second", "password": "password123"},
-    )
-    assert r.json()["role"] == "developer"
+    user = _register(client, "second@qtechtest.io", "Second")
+    assert user["role"] == "developer"
 
 
 def test_registration_cannot_grant_a_role(client, admin):
     """The hole: anyone could once register themselves as an admin."""
     r = client.post(
-        "/auth/register",
-        json={
-            "email": "sneaky@qtechtest.io",
-            "full_name": "Sneaky",
-            "password": "password123",
-            "role": "admin",
-        },
+        "/auth/signup/join",
+        json=_join_payload(client, email="sneaky@qtechtest.io", full_name="Sneaky", role="admin"),
     )
     assert r.status_code == 201
-    assert r.json()["role"] == "developer"
+    token = r.json()["access_token"]
+    me = client.get("/auth/me", headers=auth(token))
+    assert me.json()["role"] == "developer"
 
 
 def test_profile_edit_cannot_grant_a_role(client, dev):
@@ -43,8 +48,8 @@ def test_profile_edit_cannot_grant_a_role(client, dev):
 
 def test_duplicate_email_is_rejected(client, admin):
     r = client.post(
-        "/auth/register",
-        json={"email": "admin@qtechtest.io", "full_name": "Clone", "password": "password123"},
+        "/auth/signup/join",
+        json=_join_payload(client, email="admin@qtechtest.io", full_name="Clone"),
     )
     assert r.status_code == 400
     assert "already registered" in r.json()["detail"].lower()
@@ -121,8 +126,8 @@ def test_password_change_then_login(client, dev):
 
 def test_password_must_be_at_least_8_chars(client, admin):
     r = client.post(
-        "/auth/register",
-        json={"email": "short@qtechtest.io", "full_name": "Short", "password": "abc"},
+        "/auth/signup/join",
+        json=_join_payload(client, email="short@qtechtest.io", full_name="Short", password="abc"),
     )
     assert r.status_code == 422
 
@@ -130,7 +135,7 @@ def test_password_must_be_at_least_8_chars(client, admin):
 def test_password_over_72_bytes_is_rejected(client, admin):
     """bcrypt silently truncates past 72 bytes — refuse rather than truncate."""
     r = client.post(
-        "/auth/register",
-        json={"email": "long@qtechtest.io", "full_name": "Long", "password": "a" * 100},
+        "/auth/signup/join",
+        json=_join_payload(client, email="long@qtechtest.io", full_name="Long", password="a" * 100),
     )
     assert r.status_code == 422

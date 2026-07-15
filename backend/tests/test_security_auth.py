@@ -11,7 +11,7 @@ import pytest
 
 from app.config import settings
 from app.routers.auth import login_limiter
-from tests.conftest import auth, _register, _token
+from tests.conftest import auth, _register, _token, TEST_ORG_NAME, TEST_ORG_JOIN_CODE
 
 
 @pytest.fixture(autouse=True)
@@ -34,52 +34,83 @@ def signup_closed(monkeypatch):
     yield
 
 
-def _signup(client, email, password="password123"):
+def _join(client, email, password="password123", join_code=TEST_ORG_JOIN_CODE):
+    """Same two-step flow a real signup uses: find the org by name, then the
+    join code is what actually gets you in."""
+    orgs = client.get("/organizations/search", params={"name": TEST_ORG_NAME}).json()
+    org_id = orgs[0]["id"] if orgs else None
     return client.post(
-        "/auth/register",
-        json={"email": email, "full_name": "Someone", "password": password},
+        "/auth/signup/join",
+        json={
+            "email": email, "full_name": "Someone", "password": password,
+            "organization_id": org_id, "join_code": join_code,
+        },
     )
+
+
+def _create_org(client, org_name, email, password="password123", key_prefix="TST"):
+    return client.post(
+        "/auth/signup/organization",
+        json={
+            "email": email, "full_name": "Someone", "password": password,
+            "organization_name": org_name, "key_prefix": key_prefix,
+        },
+    )
+
+
+def _role_of(client, token):
+    return client.get("/auth/me", headers=auth(token)).json()["role"]
 
 
 # ---------------------------------------------------------------- registration
 
-def test_the_very_first_account_is_always_allowed(client, signup_closed):
-    """Otherwise a fresh install could never be bootstrapped — and it becomes the
-    admin anyway."""
-    r = _signup(client, "founder@anywhere.io")
+def test_creating_a_new_organization_is_always_allowed(client, signup_closed):
+    """Starting your own workspace has no domain gate at all — there's nothing
+    to protect yet, since the org doesn't exist until this call creates it.
+    Its founder becomes its admin."""
+    r = _create_org(client, "Founder Inc", "founder@anywhere.io")
     assert r.status_code == 201
-    assert r.json()["role"] == "admin"
+    token = r.json()["access_token"]
+    assert _role_of(client, token) == "admin"
 
 
-def test_with_no_allowed_domains_self_registration_is_CLOSED(client, admin, signup_closed):
+def test_with_no_allowed_domains_joining_an_org_is_CLOSED(client, admin, signup_closed):
     """THE HOLE: this used to return 201 for anyone on the internet."""
-    r = _signup(client, "randomer@gmail.com")
+    r = _join(client, "randomer@gmail.com")
     assert r.status_code == 403
-    assert "self-registration is turned off" in r.json()["detail"].lower()
+    assert "sign up" in r.json()["detail"].lower()
 
 
-def test_an_outside_domain_cannot_sign_up(client, admin, open_to_qtech):
-    r = _signup(client, "attacker@evil.example")
+def test_an_outside_domain_cannot_join(client, admin, open_to_qtech):
+    r = _join(client, "attacker@evil.example")
     assert r.status_code == 403
     # Says which domains ARE allowed: it isn't a secret, and a vague error just
     # creates a support ticket for the thing meant to be self-service.
     assert "qtechsoftware.com" in r.json()["detail"]
 
 
-def test_an_allowed_domain_can_sign_up(client, admin, open_to_qtech):
-    r = _signup(client, "newhire@qtechsoftware.com")
+def test_an_allowed_domain_can_join(client, admin, open_to_qtech):
+    r = _join(client, "newhire@qtechsoftware.com")
     assert r.status_code == 201
-    assert r.json()["role"] == "developer"   # still never an admin
+    assert _role_of(client, r.json()["access_token"]) == "developer"   # never an admin, admin already exists
 
 
 def test_the_domain_check_is_case_insensitive(client, admin, open_to_qtech):
-    assert _signup(client, "Shouty@QTechSoftware.COM").status_code == 201
+    assert _join(client, "Shouty@QTechSoftware.COM").status_code == 201
 
 
 def test_a_lookalike_domain_is_rejected(client, admin, open_to_qtech):
     """`evil-qtechsoftware.com` and `qtechsoftware.com.evil.io` must not pass."""
-    assert _signup(client, "a@evil-qtechsoftware.com").status_code == 403
-    assert _signup(client, "b@qtechsoftware.com.evil.io").status_code == 403
+    assert _join(client, "a@evil-qtechsoftware.com").status_code == 403
+    assert _join(client, "b@qtechsoftware.com.evil.io").status_code == 403
+
+
+def test_a_wrong_join_code_is_rejected(client, admin, open_to_qtech):
+    """Finding the org by name is not enough on its own — the code has to
+    match too. Same error as a nonexistent org, so the response can't be used
+    to enumerate which organizations are real."""
+    r = _join(client, "someone@qtechsoftware.com", join_code="TOTALLY-WRONG")
+    assert r.status_code == 400
 
 
 def test_admins_can_still_add_anyone_regardless_of_domain(client, admin, open_to_qtech):

@@ -1,0 +1,104 @@
+# Render Blueprint for QTech Resolver.
+#
+# This deploys on Render's FREE tier: both services below run on `plan: free`,
+# and there is deliberately no `databases:` section -- Render's free Postgres
+# expires 30 days after creation, which isn't viable for real data. Instead,
+# DATABASE_URL points at an external always-free Postgres (Neon is what the
+# deploy runbook walks through). See DEPLOYING.md for the full step-by-step.
+#
+# Known trade-offs of the free tier, so they don't come as a surprise later:
+#   - The backend spins down after 15 minutes with no traffic, and the first
+#     request after that takes ~30-60s to wake it back up (cold start).
+#   - Attachments/avatars go to an S3-compatible bucket (Cloudflare R2's free
+#     tier), not a Render disk -- free web services can't attach one, and even
+#     paid ones only support a single, non-scaled instance.
+#   - Everything here can be upgraded later (paid plan, Render's own managed
+#     Postgres, a persistent disk) without changing any application code --
+#     only env vars and this file change.
+
+services:
+  - type: web
+    name: qtech-resolver-backend
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildFilter:
+      paths:
+        - backend/**
+    buildCommand: pip install -r requirements.txt
+    # Migrations run before every deploy, not bundled into the build step --
+    # if they fail, the deploy is aborted before the old code is replaced.
+    preDeployCommand: alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+
+      # Secrets -- Render prompts for these once, during the Blueprint's
+      # initial creation flow. Paste in the values from Neon / Cloudflare R2
+      # (see DEPLOYING.md). Left blank, the backend will fail to start.
+      - key: DATABASE_URL
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_BUCKET_NAME
+        sync: false
+
+      # Generated once by Render, not something you need to supply.
+      - key: JWT_SECRET_KEY
+        generateValue: true
+
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: S3_REGION
+        value: auto
+
+      # Update this if you rename the frontend service or add a custom
+      # domain -- it must match exactly where the frontend is actually
+      # served from, or the browser's CORS preflight will fail.
+      - key: CORS_ORIGINS
+        value: https://qtech-resolver-frontend.onrender.com
+
+      # Empty means self-registration (POST /auth/signup/join) is closed --
+      # QTech's team joins via the join code from Settings instead. Starting
+      # a brand-new organization (POST /auth/signup/organization) is never
+      # affected by this setting. Set to a comma-separated domain list (e.g.
+      # "qtechsoftware.com") if you want anyone on that domain to self-join.
+      - key: ALLOWED_SIGNUP_DOMAINS
+        value: ""
+
+      - key: LOGIN_MAX_ATTEMPTS
+        value: "8"
+      - key: LOGIN_LOCKOUT_SECONDS
+        value: "900"
+
+  - type: web
+    name: qtech-resolver-frontend
+    runtime: static
+    plan: free
+    rootDir: frontend
+    buildFilter:
+      paths:
+        - frontend/**
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    # A client-side-routed SPA: every path has to fall back to index.html and
+    # let react-router take over, or a hard refresh on e.g. /board is a 404.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # Baked into the JS bundle at build time (Vite), not read at runtime --
+      # if this changes, the frontend needs a rebuild, not just a restart.
+      # Must match the backend service's actual public URL.
+      - key: VITE_API_URL
+        value: https://qtech-resolver-backend.onrender.com

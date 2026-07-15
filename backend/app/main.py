@@ -5,8 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .routers import (
-    auth, tickets, comments, users, labels, sprints, components, filters, teams,
-    files, notifications,
+    auth, tickets, comments, users, labels, sprints, sla, parent_tags, filters, teams,
+    files, notifications, organizations,
 )
 
 # Schema is owned by Alembic now, not create_all(). create_all only ever ADDS
@@ -33,13 +33,14 @@ UPLOADS.mkdir(exist_ok=True)
 app.include_router(files.router)
 
 app.include_router(auth.router)
+app.include_router(organizations.router)
 app.include_router(tickets.router)
 app.include_router(comments.router)
 app.include_router(users.router)
 app.include_router(labels.router)
 app.include_router(sprints.router)
-app.include_router(components.router)
-app.include_router(components.sla_router)
+app.include_router(sla.router)
+app.include_router(parent_tags.router)
 app.include_router(filters.router)
 app.include_router(teams.router)
 app.include_router(teams.reports_router)

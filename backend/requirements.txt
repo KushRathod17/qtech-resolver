@@ -12,3 +12,7 @@ pydantic[email]==2.9.2
 pydantic-settings==2.5.2
 alembic==1.13.3
 python-dotenv==1.0.1
+# S3-compatible object storage for attachments/avatars in production (see
+# app/storage.py) -- only imported if S3_* env vars are set, but always
+# installed so a fresh prod deploy never fails on a missing dependency.
+boto3==1.35.36

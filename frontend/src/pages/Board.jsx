@@ -16,7 +16,7 @@ import {
   labelsApi,
   usersApi,
   sprintsApi,
-  componentsApi,
+  parentTagsApi,
   filtersApi,
   teamsApi,
   errorMessage,
@@ -34,7 +34,7 @@ const EMPTY_FILTERS = {
   label_id: "",
   priority: "",
   ticket_type: "",
-  component_id: "",
+  product: "",
   current_team_id: "", // what's sitting in this team right now
   breached: "", // "" = any, "true" = only tickets past their SLA
   watching: "", // "" = any, "true" = only tickets I watch
@@ -45,7 +45,7 @@ export default function Board() {
   const [users, setUsers] = useState([]);
   const [labels, setLabels] = useState([]);
   const [sprints, setSprints] = useState([]);
-  const [components, setComponents] = useState([]);
+  const [parentTags, setParentTags] = useState([]);
   const [clients, setClients] = useState([]);
   const [teams, setTeams] = useState([]);
   const [savedFilters, setSavedFilters] = useState([]);
@@ -98,16 +98,16 @@ export default function Board() {
       usersApi.list(),
       labelsApi.list(),
       sprintsApi.list(),
-      componentsApi.list(),
+      parentTagsApi.list(),
       ticketsApi.clients(),
       filtersApi.list(),
       teamsApi.list(),
     ])
-      .then(([u, l, s, c, cl, sf, tm]) => {
+      .then(([u, l, s, pt, cl, sf, tm]) => {
         setUsers(u);
         setLabels(l);
         setSprints(s);
-        setComponents(c);
+        setParentTags(pt);
         setClients(cl);
         setSavedFilters(sf);
         setTeams(tm);
@@ -173,9 +173,9 @@ export default function Board() {
       if (found) setOpenTicket(found);
       setSearchParams({}, { replace: true });
     }
-    const component = searchParams.get("component");
-    if (component) {
-      setFilters((f) => ({ ...f, component_id: component }));
+    const product = searchParams.get("product");
+    if (product) {
+      setFilters((f) => ({ ...f, product }));
       setSearchParams({}, { replace: true });
     }
     if (searchParams.get("updated")) {
@@ -348,7 +348,6 @@ export default function Board() {
         setFilters={setFilters}
         users={users}
         labels={labels}
-        components={components}
         teams={teams}
         savedFilters={savedFilters}
         onSaveFilter={handleSaveFilter}
@@ -425,7 +424,7 @@ export default function Board() {
           ticket={openTicket}
           users={users}
           labels={labels}
-          components={components}
+          parentTags={parentTags}
           clients={clients}
           teams={teams}
           onClose={() => {
@@ -433,7 +432,18 @@ export default function Board() {
             setCreating(false);
           }}
           onSaved={(saved) => upsert(saved)}
+          // Right after creation the same panel swaps from "create" to "edit"
+          // in place, so Attachments (an edit-only section — the API has
+          // nowhere to upload a file before the ticket row exists) opens
+          // immediately instead of making the user reopen what they just made.
+          onCreated={(saved) => {
+            setCreating(false);
+            setOpenTicket(saved);
+          }}
           onDeleted={(id) => setTickets((prev) => prev.filter((t) => t.id !== id))}
+          // A linked ticket may not be in the (filtered) board list yet — jump
+          // to it directly rather than relying on tickets.find turning up empty.
+          onOpenTicket={(t) => setOpenTicket(t)}
           onLabelCreated={(label) =>
             setLabels((prev) =>
               prev.some((l) => l.id === label.id)

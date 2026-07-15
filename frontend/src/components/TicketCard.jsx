@@ -39,19 +39,11 @@ export function TicketCardBody({ ticket, dragging = false, selected = false }) {
         selected ? "selected" : "",
       ].join(" ")}
     >
-      {(ticket.component || ticket.labels.length > 0) && (
+      {(ticket.product || ticket.labels.length > 0) && (
         <div className="label-row">
-          {/* Component first: on a queue spanning OTRAMS / RateNet / rePUSHTI,
+          {/* Product first: on a queue spanning OTRAMS / RateNet / rePUSHTI,
               "which product is this?" is the first question, every time. */}
-          {ticket.component && (
-            <span
-              className="component-chip"
-              style={{ borderColor: ticket.component.color, color: ticket.component.color }}
-              title={ticket.component.description || ticket.component.name}
-            >
-              {ticket.component.name}
-            </span>
-          )}
+          {ticket.product && <span className="product-chip">{ticket.product}</span>}
           {ticket.labels.map((l) => (
             <LabelChip key={l.id} label={l} />
           ))}
@@ -68,17 +60,6 @@ export function TicketCardBody({ ticket, dragging = false, selected = false }) {
             </span>
           )}
           <SlaBadge sla={ticket.sla} compact />
-        </div>
-      )}
-
-      {ticket.progress && ticket.progress.total > 0 && (
-        <div className="epic-progress" title={`${ticket.progress.points_done}/${ticket.progress.points_total} points`}>
-          <div className="progress-track">
-            <div className="progress-fill" style={{ width: `${ticket.progress.percent}%` }} />
-          </div>
-          <span className="epic-progress-label">
-            {ticket.progress.done}/{ticket.progress.total} done
-          </span>
         </div>
       )}
 

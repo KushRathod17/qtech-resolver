@@ -21,7 +21,7 @@ def get_velocity(
 ):
     """Committed vs completed points per sprint. Declared before /{sprint_id}
     so that 'velocity' isn't parsed as a sprint UUID."""
-    return crud.velocity(db)
+    return crud.velocity(db, current_user.organization_id)
 
 
 @router.get("/", response_model=list[SprintOut])
@@ -29,7 +29,7 @@ def list_sprints(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return crud.get_sprints(db)
+    return crud.get_sprints(db, current_user.organization_id)
 
 
 @router.post("/", response_model=SprintOut, status_code=status.HTTP_201_CREATED)
@@ -40,7 +40,7 @@ def create_sprint(
 ):
     if payload.start_date and payload.end_date and payload.end_date < payload.start_date:
         raise HTTPException(status_code=400, detail="end_date cannot be before start_date")
-    return crud.create_sprint(db, payload)
+    return crud.create_sprint(db, payload, current_user.organization_id)
 
 
 @router.get("/{sprint_id}", response_model=SprintOut)
@@ -49,7 +49,7 @@ def get_sprint(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    sprint = crud.get_sprint(db, sprint_id)
+    sprint = crud.get_sprint(db, sprint_id, current_user.organization_id)
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
     return sprint
@@ -61,7 +61,7 @@ def get_sprint_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    sprint = crud.get_sprint(db, sprint_id)
+    sprint = crud.get_sprint(db, sprint_id, current_user.organization_id)
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
     return crud.sprint_stats(db, sprint)
@@ -73,7 +73,7 @@ def get_sprint_burndown(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    sprint = crud.get_sprint(db, sprint_id)
+    sprint = crud.get_sprint(db, sprint_id, current_user.organization_id)
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
     return crud.sprint_burndown(db, sprint)
@@ -85,10 +85,10 @@ def list_sprint_tickets(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    sprint = crud.get_sprint(db, sprint_id)
+    sprint = crud.get_sprint(db, sprint_id, current_user.organization_id)
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
-    return crud.get_tickets(db, sprint_id=sprint_id)
+    return crud.get_tickets(db, current_user.organization_id, sprint_id=sprint_id)
 
 
 @router.patch("/{sprint_id}", response_model=SprintOut)
@@ -98,7 +98,7 @@ def update_sprint(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
 ):
-    sprint = crud.get_sprint(db, sprint_id)
+    sprint = crud.get_sprint(db, sprint_id, current_user.organization_id)
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
 
@@ -116,7 +116,7 @@ def delete_sprint(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
 ):
-    sprint = crud.get_sprint(db, sprint_id)
+    sprint = crud.get_sprint(db, sprint_id, current_user.organization_id)
     if not sprint:
         raise HTTPException(status_code=404, detail="Sprint not found")
     # Tickets survive; their sprint_id is nulled by the FK's ON DELETE SET NULL.

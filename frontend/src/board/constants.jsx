@@ -10,10 +10,13 @@ export const COLUMNS = [
   { key: "done", label: "Done" },
 ];
 
-export const PRIORITIES = ["highest", "high", "medium", "low", "lowest"];
-// subtask is omitted from the pickers: you create one from its parent, never by
-// changing a loose ticket's type into an orphan with no parent.
-export const TICKET_TYPES = ["epic", "story", "task", "bug"];
+// Collapsed from 5 priorities to 3, and from 4 types to 2 (subtask is
+// omitted from the pickers: you create one from its parent, never by
+// changing a loose ticket's type into an orphan with no parent). Highest,
+// Lowest, Epic and Story still render correctly below (old tickets, if any
+// slip through) but are never offered as a choice.
+export const PRIORITIES = ["high", "medium", "low"];
+export const TICKET_TYPES = ["task", "bug"];
 
 export const PRIORITY_LABELS = {
   highest: "Highest",
@@ -29,6 +32,46 @@ export const TYPE_LABELS = {
   task: "Task",
   bug: "Bug",
   subtask: "Sub-task",
+};
+
+// The sub-classification that replaced Story/Epic — only meaningful when
+// ticket_type === "task".
+export const TASK_CATEGORIES = [
+  "new_development",
+  "enhancement",
+  "maintenance",
+  "documentation",
+  "investigation",
+  "configuration",
+];
+
+export const TASK_CATEGORY_LABELS = {
+  new_development: "New Development",
+  enhancement: "Enhancement",
+  maintenance: "Maintenance",
+  documentation: "Documentation",
+  investigation: "Investigation",
+  configuration: "Configuration",
+};
+
+// Fixed list, migrated 1:1 from the old configurable Components table — see
+// the backend migration. Not an API call: this set changes rarely enough
+// that a deploy is a fine way to change it.
+export const PRODUCTS = [
+  "OTRAMS-Booking",
+  "OTRAMS-Payments",
+  "OTRAMS-Reporting",
+  "RateNet-API",
+  "rePUSHTI",
+  "Bizinso-Custom",
+];
+
+export const ENVIRONMENT_STAGES = ["production", "staging", "other"];
+
+export const ENVIRONMENT_STAGE_LABELS = {
+  production: "Production",
+  staging: "Staging",
+  other: "Other",
 };
 
 /** Ticket-type icon: colour + glyph, mirroring Jira's shorthand. */
@@ -87,8 +130,10 @@ export function avatarColor(id = "") {
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
-// Avatar images are served by the API, not the Vite dev server.
-export const API_ORIGIN = "http://127.0.0.1:8000";
+// Avatar images are served by the API, not the Vite dev server. (Actual
+// fetches go through apiClient/useFileUrl, which already respect
+// VITE_API_URL -- this constant is kept in sync for any other consumer.)
+export const API_ORIGIN = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 export function Avatar({ user, size = 24, title }) {
   // /uploads requires a token now, so the image is fetched with one and turned

@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 
-import { ticketsApi, commentsApi, workflowApi, teamsApi, errorMessage } from "../api/resources";
+import {
+  ticketsApi,
+  commentsApi,
+  workflowApi,
+  teamsApi,
+  parentTagsApi,
+  errorMessage,
+} from "../api/resources";
 import { useAuth } from "../context/AuthContext";
 import LabelPicker from "./LabelPicker";
 import SlaBadge from "./SlaBadge";
@@ -16,10 +23,23 @@ import {
   PRIORITY_LABELS,
   TICKET_TYPES,
   TYPE_LABELS,
+  TASK_CATEGORIES,
+  TASK_CATEGORY_LABELS,
+  PRODUCTS,
+  ENVIRONMENT_STAGES,
+  ENVIRONMENT_STAGE_LABELS,
   TypeIcon,
   PriorityIcon,
   Avatar,
 } from "../board/constants";
+
+const MAX_ATTACHMENT_MB = 10;
+
+function humanSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const BLANK = {
   title: "",
@@ -27,11 +47,19 @@ const BLANK = {
   status: "todo",
   priority: "medium",
   ticket_type: "task",
+  task_category: "",
   story_points: "",
   assignee_id: "",
-  component_id: "",
+  product: "",
+  parent_tag_id: "",
   client_name: "",
+  start_date: "",
   due_date: "",
+  steps_to_reproduce: "",
+  expected_behavior: "",
+  actual_behavior: "",
+  environment_stage: "",
+  browser_version: "",
   label_ids: [],
 };
 
@@ -45,11 +73,19 @@ function ticketToForm(t) {
     status: t.status,
     priority: t.priority,
     ticket_type: t.ticket_type,
+    task_category: t.task_category || "",
     story_points: t.story_points ?? "",
     assignee_id: t.assignee?.id || "",
-    component_id: t.component?.id || "",
+    product: t.product || "",
+    parent_tag_id: t.parent_tag?.id || "",
     client_name: t.client_name || "",
+    start_date: toDateInput(t.start_date),
     due_date: toDateInput(t.due_date),
+    steps_to_reproduce: t.steps_to_reproduce || "",
+    expected_behavior: t.expected_behavior || "",
+    actual_behavior: t.actual_behavior || "",
+    environment_stage: t.environment_stage || "",
+    browser_version: t.browser_version || "",
     label_ids: t.labels.map((l) => l.id),
   };
 }
@@ -58,13 +94,15 @@ export default function TicketModal({
   ticket,
   users,
   labels,
-  components = [],
+  parentTags = [],
   clients = [],
   teams = [],
   onClose,
   onSaved,
+  onCreated,
   onDeleted,
   onLabelCreated,
+  onOpenTicket,
 }) {
   const isNew = !ticket;
   const { user } = useAuth();
@@ -114,6 +152,84 @@ export default function TicketModal({
   const [threadLoading, setThreadLoading] = useState(!isNew);
   const [posting, setPosting] = useState(false);
 
+  // --- Attachments picked before the ticket exists ---
+  // The API has nowhere to upload a file until the ticket row exists, but
+  // there's no reason the FORM should wait — files picked here are queued
+  // client-side and uploaded right after Create succeeds, as one action from
+  // the person's point of view.
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [pendingError, setPendingError] = useState("");
+
+  function queueFiles(fileList) {
+    const incoming = Array.from(fileList || []);
+    const tooBig = incoming.filter((f) => f.size > MAX_ATTACHMENT_MB * 1024 * 1024);
+    if (tooBig.length) {
+      setPendingError(
+        `${tooBig.map((f) => f.name).join(", ")} — over the ${MAX_ATTACHMENT_MB} MB limit, not queued.`
+      );
+    } else {
+      setPendingError("");
+    }
+    const ok = incoming.filter((f) => f.size <= MAX_ATTACHMENT_MB * 1024 * 1024);
+    setPendingFiles((prev) => [...prev, ...ok]);
+  }
+
+  function unqueueFile(index) {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  // --- Linking under an existing ticket (rather than a separately-created
+  // abstract tag) ---
+  // Every ticket, unfiltered, fetched once so the "link under" picker isn't at
+  // the mercy of whatever filters happen to be active on the board right now.
+  const [allTicketsForLinking, setAllTicketsForLinking] = useState([]);
+  useEffect(() => {
+    ticketsApi.list({}).then(setAllTicketsForLinking).catch(() => setAllTicketsForLinking([]));
+  }, []);
+
+  // Offered as "link under": open work, not this ticket itself. The current
+  // parent stays in the list even if it's since been resolved, so the select
+  // doesn't silently lose its value out from under the user.
+  const linkableTickets = allTicketsForLinking.filter(
+    (t) =>
+      (t.status !== "done" || t.id === form.parent_tag_id) &&
+      (isNew || t.id !== ticket.id)
+  );
+
+  // Tickets grouped under THIS one, if it's ever been picked as someone
+  // else's parent — a 404 here just means it isn't a hub, not an error.
+  const [linkedTickets, setLinkedTickets] = useState([]);
+  useEffect(() => {
+    if (isNew) {
+      setLinkedTickets([]);
+      return;
+    }
+    parentTagsApi
+      .tickets(ticket.id)
+      .then(setLinkedTickets)
+      .catch(() => setLinkedTickets([]));
+  }, [isNew, ticket?.id]);
+
+  // Live preview of what's ALREADY under whatever's picked in the Parent tag
+  // select, right there while picking it — not something you only discover
+  // after saving and reopening the ticket you just linked under.
+  const [siblingPreview, setSiblingPreview] = useState([]);
+  const [siblingLoading, setSiblingLoading] = useState(false);
+  useEffect(() => {
+    if (!form.parent_tag_id) {
+      setSiblingPreview([]);
+      return;
+    }
+    setSiblingLoading(true);
+    parentTagsApi
+      .tickets(form.parent_tag_id)
+      .then((list) => setSiblingPreview(list.filter((t) => isNew || t.id !== ticket.id)))
+      // A ticket picked from "link under an existing ticket" that's never
+      // been a hub before has no tag row yet -> 404 -> nothing under it yet.
+      .catch(() => setSiblingPreview([]))
+      .finally(() => setSiblingLoading(false));
+  }, [form.parent_tag_id, isNew, ticket?.id]);
+
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
   const loadThread = useCallback(async () => {
@@ -147,6 +263,15 @@ export default function TicketModal({
   }, [onClose]);
 
   function payload() {
+    // form.parent_tag_id holds one id picked from a merged list (existing open
+    // tickets to link under, or existing abstract tags) — whichever kind it is
+    // decides which field carries it. Linking under a ticket needs
+    // parent_ticket_id specifically: the server finds-or-creates that ticket's
+    // backing tag, which a raw parent_tag_id can't do for a ticket that isn't
+    // a hub yet.
+    const linkingTicket =
+      form.parent_tag_id && allTicketsForLinking.some((t) => t.id === form.parent_tag_id);
+
     return {
       title: form.title.trim(),
       description: form.description.trim() || null,
@@ -155,10 +280,22 @@ export default function TicketModal({
       ...(workflowOwned ? {} : { status: form.status, assignee_id: form.assignee_id || null }),
       priority: form.priority,
       ticket_type: form.ticket_type,
+      // Task Category only means something on a Task; sending it on a Bug
+      // would just be confusing data nobody asked for.
+      task_category: form.ticket_type === "task" && form.task_category ? form.task_category : null,
       story_points: form.story_points === "" ? null : Number(form.story_points),
-      component_id: form.component_id || null,
+      product: form.product || null,
+      parent_tag_id: linkingTicket ? null : (form.parent_tag_id || null),
+      parent_ticket_id: linkingTicket ? form.parent_tag_id : null,
       client_name: form.client_name.trim() || null,
+      start_date: form.start_date || null,
       due_date: form.due_date ? new Date(form.due_date).toISOString() : null,
+      // Rich bug fields only meaningful on a Bug — same reasoning as category.
+      steps_to_reproduce: form.ticket_type === "bug" ? (form.steps_to_reproduce.trim() || null) : null,
+      expected_behavior: form.ticket_type === "bug" ? (form.expected_behavior.trim() || null) : null,
+      actual_behavior: form.ticket_type === "bug" ? (form.actual_behavior.trim() || null) : null,
+      environment_stage: form.ticket_type === "bug" ? (form.environment_stage || null) : null,
+      browser_version: form.ticket_type === "bug" ? (form.browser_version.trim() || null) : null,
       label_ids: form.label_ids,
       // Only meaningful on create — this is what raises it into the workflow.
       ...(isNew && routeUserId
@@ -175,11 +312,37 @@ export default function TicketModal({
     setSaving(true);
     setError("");
     try {
-      const saved = isNew
-        ? await ticketsApi.create(payload())
-        : await ticketsApi.update(ticket.id, payload());
-      onSaved(saved);
-      onClose();
+      if (isNew) {
+        const saved = await ticketsApi.create(payload());
+
+        // Files picked before the ticket existed get uploaded now, as the
+        // back half of this one Create action — not a separate trip.
+        const failed = [];
+        for (const file of pendingFiles) {
+          try {
+            await ticketsApi.uploadAttachment(saved.id, file);
+          } catch {
+            failed.push(file.name);
+          }
+        }
+
+        onSaved(saved);
+
+        if (failed.length === 0) {
+          onClose();
+        } else {
+          // The ticket and any attachments that DID go through are safe either
+          // way — only the failed ones need a retry, so drop into edit mode
+          // (Attachments section included) instead of silently losing them.
+          setError(`Ticket created, but ${failed.join(", ")} didn't attach. Retry below.`);
+          setPendingFiles([]);
+          if (onCreated) onCreated(saved);
+        }
+      } else {
+        const saved = await ticketsApi.update(ticket.id, payload());
+        onSaved(saved);
+        onClose();
+      }
     } catch (err) {
       setError(errorMessage(err, "Couldn't save the ticket."));
     } finally {
@@ -226,25 +389,6 @@ export default function TicketModal({
       onClose();
     } catch (err) {
       setError(errorMessage(err, "Couldn't duplicate that ticket."));
-      setSaving(false);
-    }
-  }
-
-  async function handleConvertToEpic() {
-    if (
-      !window.confirm(
-        `Convert ${ticket.key} to an epic? Its sub-tasks become full tickets grouped under it.`
-      )
-    )
-      return;
-    setSaving(true);
-    setError("");
-    try {
-      const saved = await ticketsApi.convertToEpic(ticket.id);
-      onSaved(saved);
-      onClose();
-    } catch (err) {
-      setError(errorMessage(err, "Couldn't convert that ticket."));
       setSaving(false);
     }
   }
@@ -390,6 +534,26 @@ export default function TicketModal({
             </div>
           </div>
 
+          {/* Task Category replaced Story/Epic — it only means something once
+              this is a Task, so it's hidden entirely for a Bug. */}
+          {form.ticket_type === "task" && (
+            <div className="field">
+              <label>Task category</label>
+              <div className="segmented-bar">
+                {TASK_CATEGORIES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    className={`segmented-option ${form.task_category === c ? "active" : ""}`}
+                    onClick={() => setForm((f) => ({ ...f, task_category: c }))}
+                  >
+                    {TASK_CATEGORY_LABELS[c]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="field-row">
             <div className="field">
               <label htmlFor="t-priority">Priority</label>
@@ -438,14 +602,21 @@ export default function TicketModal({
 
           <div className="field-row">
             <div className="field">
-              <label htmlFor="t-component">Component</label>
-              <select id="t-component" value={form.component_id} onChange={set("component_id")}>
+              <label htmlFor="t-start">Start date</label>
+              <input id="t-start" type="date" value={form.start_date} onChange={set("start_date")} />
+            </div>
+            <div className="field">
+              <label htmlFor="t-product">Product</label>
+              <select id="t-product" value={form.product} onChange={set("product")}>
                 <option value="">None</option>
-                {components.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                {PRODUCTS.map((p) => (
+                  <option key={p} value={p}>{p}</option>
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className="field-row">
             <div className="field">
               <label htmlFor="t-client">Client</label>
               {/* Free text with a datalist: the client who raised this is often
@@ -464,6 +635,73 @@ export default function TicketModal({
               </datalist>
             </div>
           </div>
+
+          {/* Rich bug-report fields — only meaningful, and only shown, once
+              this is a Bug. A Task just has Product and nothing else here. */}
+          {form.ticket_type === "bug" && (
+            <section className="modal-section bug-report-fields">
+              <h4>Bug report details</h4>
+
+              <div className="field">
+                <label htmlFor="t-steps">Steps to reproduce</label>
+                <textarea
+                  id="t-steps"
+                  rows={4}
+                  value={form.steps_to_reproduce}
+                  onChange={set("steps_to_reproduce")}
+                  placeholder="1. Go to…&#10;2. Click…&#10;3. See error"
+                  maxLength={4000}
+                />
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label htmlFor="t-expected">Expected behavior</label>
+                  <textarea
+                    id="t-expected"
+                    rows={3}
+                    value={form.expected_behavior}
+                    onChange={set("expected_behavior")}
+                    placeholder="What should have happened?"
+                    maxLength={2000}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="t-actual">Actual behavior</label>
+                  <textarea
+                    id="t-actual"
+                    rows={3}
+                    value={form.actual_behavior}
+                    onChange={set("actual_behavior")}
+                    placeholder="What actually happened?"
+                    maxLength={2000}
+                  />
+                </div>
+              </div>
+
+              <div className="field-row">
+                <div className="field">
+                  <label htmlFor="t-env">Environment</label>
+                  <select id="t-env" value={form.environment_stage} onChange={set("environment_stage")}>
+                    <option value="">Unspecified</option>
+                    {ENVIRONMENT_STAGES.map((e) => (
+                      <option key={e} value={e}>{ENVIRONMENT_STAGE_LABELS[e]}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="t-browser">Browser / version</label>
+                  <input
+                    id="t-browser"
+                    value={form.browser_version}
+                    onChange={set("browser_version")}
+                    placeholder="e.g. Chrome 126"
+                    maxLength={120}
+                  />
+                </div>
+              </div>
+            </section>
+          )}
 
           {!isNew && ticket.sla && (
             <div className="sla-strip">
@@ -520,6 +758,64 @@ export default function TicketModal({
           )}
 
           <div className="field">
+            <label htmlFor="t-parent-tag">Parent tag</label>
+            {/* Groups this ticket under a feature/initiative/client project,
+                regardless of type, sprint, or assignee. Either pick an existing
+                open ticket to link straight under (the common case — no need
+                to make an abstract tag first) or an existing tag from the
+                Parent Tags page. */}
+            <select id="t-parent-tag" value={form.parent_tag_id} onChange={set("parent_tag_id")}>
+              <option value="">None</option>
+              {linkableTickets.length > 0 && (
+                <optgroup label="Link under an existing ticket">
+                  {linkableTickets.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.key} · {t.title} — {TYPE_LABELS[t.ticket_type]},{" "}
+                      {COLUMNS.find((c) => c.key === t.status)?.label || t.status}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {parentTags.length > 0 && (
+                <optgroup label="Existing parent tags">
+                  {parentTags.map((pt) => (
+                    <option key={pt.id} value={pt.id}>{pt.name}</option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+
+            {/* What's already grouped under whatever's picked above, right
+                here as you pick it — no need to save and reopen it to find out. */}
+            {form.parent_tag_id && (
+              <div className="sibling-preview">
+                {siblingLoading ? (
+                  <p className="empty-state">Checking what else is under this…</p>
+                ) : siblingPreview.length === 0 ? (
+                  <p className="empty-state">Nothing else grouped under this yet.</p>
+                ) : (
+                  <>
+                    <p className="field-hint">Also under this:</p>
+                    <ul className="backlog-list">
+                      {siblingPreview.map((t) => (
+                        <li key={t.id} className="backlog-row linked-ticket-row">
+                          <TypeIcon type={t.ticket_type} />
+                          <span className="ticket-id">{t.key}</span>
+                          <span className="backlog-title">{t.title}</span>
+                          <span className={`state-pill state-${t.status}`}>
+                            {COLUMNS.find((c) => c.key === t.status)?.label || t.status}
+                          </span>
+                          <PriorityIcon priority={t.priority} />
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="field">
             <label>Labels</label>
             <LabelPicker
               labels={labels}
@@ -528,6 +824,53 @@ export default function TicketModal({
               onLabelCreated={onLabelCreated}
             />
           </div>
+
+          {/* Files picked here upload right after the ticket is created — see
+              handleSave. No waiting for a second, edit-mode trip. */}
+          {isNew && (
+            <section className="modal-section">
+              <h4>
+                Attachments {pendingFiles.length > 0 && <span className="subtask-tally">{pendingFiles.length}</span>}
+              </h4>
+
+              {pendingError && <p className="error-text" role="alert">{pendingError}</p>}
+
+              {pendingFiles.length > 0 && (
+                <ul className="attachment-list">
+                  {pendingFiles.map((f, i) => (
+                    <li key={`${f.name}-${f.lastModified}-${i}`} className="attachment-row">
+                      <span className="attachment-icon" aria-hidden="true">📎</span>
+                      <span className="attachment-name">{f.name}</span>
+                      <span className="attachment-meta">{humanSize(f.size)}</span>
+                      <button
+                        type="button"
+                        className="btn-ghost subtask-x"
+                        onClick={() => unqueueFile(i)}
+                        aria-label={`Remove ${f.name}`}
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="attachment-upload">
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => {
+                    queueFiles(e.target.files);
+                    e.target.value = "";
+                  }}
+                  aria-label="Attach a file"
+                />
+                <span className="field-hint">
+                  Uploaded once you hit Create. Max {MAX_ATTACHMENT_MB} MB each.
+                </span>
+              </div>
+            </section>
+          )}
 
           {!isNew && (
             <div className="panel-facts">
@@ -544,23 +887,44 @@ export default function TicketModal({
 
           {error && <p className="error-text" role="alert">{error}</p>}
 
-          {!isNew && ticket.progress && (
-            <div className="epic-progress-panel">
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: `${ticket.progress.percent}%` }} />
-              </div>
-              <div className="sprint-stats">
-                <span><strong>{ticket.progress.done}</strong>/{ticket.progress.total} tickets done</span>
-                <span><strong>{ticket.progress.points_done}</strong>/{ticket.progress.points_total} points</span>
-                <span>{ticket.progress.percent}%</span>
-              </div>
-            </div>
-          )}
-
           {!isNew && (
             <>
-              {/* Epics group tickets; only non-epics own sub-tasks. */}
-              {ticket.ticket_type !== "epic" && !ticket.parent_id && (
+              {/* Only shows up once something has actually been linked under
+                  this ticket — most tickets are never a hub, and that's fine. */}
+              {linkedTickets.length > 0 && (
+                <section className="modal-section">
+                  <h4>
+                    Linked tickets{" "}
+                    <span className="subtask-tally">
+                      {linkedTickets.length} ticket{linkedTickets.length === 1 ? "" : "s"}
+                    </span>
+                  </h4>
+                  <ul className="backlog-list">
+                    {linkedTickets.map((t) => (
+                      <li
+                        key={t.id}
+                        className="backlog-row linked-ticket-row"
+                        role={onOpenTicket ? "button" : undefined}
+                        tabIndex={onOpenTicket ? 0 : undefined}
+                        onClick={() => onOpenTicket?.(t)}
+                        onKeyDown={(e) => e.key === "Enter" && onOpenTicket?.(t)}
+                      >
+                        <TypeIcon type={t.ticket_type} />
+                        <span className="ticket-id">{t.key}</span>
+                        <span className="backlog-title">{t.title}</span>
+                        <span className={`state-pill state-${t.status}`}>
+                          {COLUMNS.find((c) => c.key === t.status)?.label || t.status}
+                        </span>
+                        <PriorityIcon priority={t.priority} />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {/* Only a top-level ticket owns sub-tasks; a sub-task can't nest
+                  further. */}
+              {!ticket.parent_id && (
                 <SubtaskList ticket={ticket} users={users} onChanged={loadThread} />
               )}
 
@@ -634,11 +998,6 @@ export default function TicketModal({
           {!isNew && (
             <button type="button" className="btn-ghost" onClick={handleDuplicate} disabled={saving}>
               Duplicate
-            </button>
-          )}
-          {!isNew && ticket.ticket_type !== "epic" && !ticket.parent_id && (
-            <button type="button" className="btn-ghost" onClick={handleConvertToEpic} disabled={saving}>
-              Convert to epic
             </button>
           )}
           <div className="spacer" />

@@ -69,11 +69,22 @@ def db(engine):
     Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     session = Session()
 
+    # Every test runs inside one implicit organization -- the multi-org signup
+    # flow (create-org vs join-org) has its own tests once it exists; these
+    # tests are about the app's behaviour WITHIN a tenant, so one is seeded up
+    # front the same way the SLA reference data below is.
+    org = models.Organization(
+        name="QTech Test Org", key_prefix="QTR", join_code="TESTJOIN1",
+    )
+    session.add(org)
+    session.commit()
+    session.refresh(org)
+
     # The SLA policies are reference data seeded by a migration in dev; the
     # schema alone doesn't carry them, so tests must set them up explicitly.
     session.add_all([
-        models.SLAPolicy(priority=models.TicketPriority.HIGHEST, threshold_hours=4),
-        models.SLAPolicy(priority=models.TicketPriority.HIGH, threshold_hours=8),
+        models.SLAPolicy(organization_id=org.id, priority=models.TicketPriority.HIGHEST, threshold_hours=4),
+        models.SLAPolicy(organization_id=org.id, priority=models.TicketPriority.HIGH, threshold_hours=8),
     ])
     session.commit()
 
@@ -101,10 +112,31 @@ def client(db):
 
 # ---------------------------------------------------------------- users
 
+# Must match the org the `db` fixture creates -- self-registration is now
+# always "join a specific organization", so every test user joins this one via
+# the same search-then-join-code flow a real signup uses.
+TEST_ORG_NAME = "QTech Test Org"
+TEST_ORG_JOIN_CODE = "TESTJOIN1"
+
+
 def _register(client, email, name, password="password123"):
-    r = client.post("/auth/register", json={"email": email, "full_name": name, "password": password})
+    orgs = client.get("/organizations/search", params={"name": TEST_ORG_NAME}).json()
+    assert orgs, "the db fixture should have already created the test organization"
+    r = client.post(
+        "/auth/signup/join",
+        json={
+            "email": email,
+            "full_name": name,
+            "password": password,
+            "organization_id": orgs[0]["id"],
+            "join_code": TEST_ORG_JOIN_CODE,
+        },
+    )
     assert r.status_code == 201, r.text
-    return r.json()
+    token = r.json()["access_token"]
+    me = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 200, me.text
+    return me.json()
 
 
 def _token(client, email, password="password123"):

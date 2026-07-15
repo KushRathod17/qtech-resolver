@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { COLUMNS, PRIORITIES, PRIORITY_LABELS } from "../board/constants";
+import { COLUMNS, PRIORITIES, PRIORITY_LABELS, PRODUCTS } from "../board/constants";
 import { useAuth } from "../context/AuthContext";
 
 /**
@@ -62,6 +62,13 @@ export default function BulkActionBar({
         <option value="">Priority…</option>
         {PRIORITIES.map((p) => (
           <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>
+        ))}
+      </select>
+
+      <select className="filter-select" defaultValue="" disabled={busy} onChange={fire((v) => ({ product: v }))} aria-label="Set product">
+        <option value="">Product…</option>
+        {PRODUCTS.map((p) => (
+          <option key={p} value={p}>{p}</option>
         ))}
       </select>
 

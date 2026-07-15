@@ -22,6 +22,20 @@ Base.metadata.create_all(bind=engine)
 
 db = SessionLocal()
 
+# ---------- Organization ----------
+# Every row below belongs to this one tenant -- seed.py only ever builds a
+# single demo workspace.
+import secrets as _secrets
+org = models.Organization(
+    name="QTech Software",
+    key_prefix="QTR",
+    join_code=_secrets.token_hex(4).upper(),
+)
+db.add(org)
+db.commit()
+db.refresh(org)
+print(f"  org: {org.name}  join code: {org.join_code}")
+
 # ---------- Users ----------
 people = [
     ("kanishk@qtechsoftware.com", "Kanishk Sharma", UserRole.ADMIN),
@@ -35,6 +49,7 @@ for email, name, role in people:
         db,
         schemas.UserCreate(email=email, full_name=name, password="password123"),
         role=role,
+        organization_id=org.id,
     )
     print(f"  user: {name:<16} {role.value:<10} password123")
 
@@ -53,7 +68,7 @@ label_specs = [
     ("Design", "#EC4899"),
 ]
 labels = {
-    name: crud.create_label(db, schemas.LabelCreate(name=name, color=color))
+    name: crud.create_label(db, schemas.LabelCreate(name=name, color=color), org.id)
     for name, color in label_specs
 }
 print(f"  {len(labels)} labels")
@@ -66,19 +81,20 @@ sprint = crud.create_sprint(db, schemas.SprintCreate(
     state=SprintState.ACTIVE,
     start_date=today - timedelta(days=4),
     end_date=today + timedelta(days=10),
-))
+), org.id)
 print(f"  sprint: {sprint.name}")
 
-# ---------- Epic ----------
+# ---------- Hub ticket (the old "Epic" concept is now just a ticket other
+# tickets link under via parent_tag_id) ----------
 epic = crud.create_ticket(db, schemas.TicketCreate(
     title="Checkout & Payments Overhaul",
-    description="Umbrella epic for the Q3 payments work.",
-    ticket_type=TicketType.EPIC,
+    description="Umbrella ticket for the Q3 payments work.",
+    ticket_type=TicketType.TASK,
     status=TicketStatus.IN_PROGRESS,
     priority=TicketPriority.HIGH,
     label_ids=[labels["Payments"].id],
-), created_by_id=admin.id)
-print(f"  epic: {epic.key} {epic.title}")
+), created_by_id=admin.id, organization_id=org.id)
+print(f"  hub: {epic.key} {epic.title}")
 
 # ---------- Tickets ----------
 now = datetime.utcnow()
@@ -123,10 +139,10 @@ for title, desc, ttype, tstatus, prio, points, assignee, label_names, due_offset
         story_points=points,
         assignee_id=assignee.id if assignee else None,
         sprint_id=sprint.id,
-        epic_id=epic.id if "Payments" in label_names else None,
+        parent_ticket_id=epic.id if "Payments" in label_names else None,
         due_date=now + timedelta(days=due_offset),
         label_ids=[labels[n].id for n in label_names],
-    ), created_by_id=priya.id)
+    ), created_by_id=priya.id, organization_id=org.id)
     if tstatus == TicketStatus.DONE:
         done_in_sprint.append(t)
     print(f"  {t.key:<8} {t.status.value:<12} {t.title}")
@@ -136,6 +152,7 @@ for title, desc, ttype, tstatus, prio, points, assignee, label_names, due_offset
 # active sprint's line would sit flat at full points.
 for offset, t in enumerate(done_in_sprint):
     db.add(models.ActivityLog(
+        organization_id=org.id,
         ticket_id=t.id,
         actor_id=arjun.id,
         action="status_changed",
@@ -164,7 +181,7 @@ for name, committed, completed, start_ago, end_ago in history:
         state=SprintState.COMPLETED,
         start_date=today - timedelta(days=start_ago),
         end_date=today - timedelta(days=end_ago),
-    ))
+    ), org.id)
 
     remaining_done = completed
     remaining_total = committed
@@ -177,14 +194,14 @@ for name, committed, completed, start_ago, end_ago in history:
         t = crud.create_ticket(db, schemas.TicketCreate(
             title=f"{name} — work item {n}",
             description="Delivered in a previous sprint.",
-            ticket_type=TicketType.STORY,
+            ticket_type=TicketType.TASK,
             status=TicketStatus.DONE if finish else TicketStatus.TODO,
             priority=TicketPriority.MEDIUM,
             story_points=pts,
             assignee_id=[arjun.id, sara.id, priya.id][n % 3],
             sprint_id=past.id,
             label_ids=[labels["Payments"].id],
-        ), created_by_id=priya.id)
+        ), created_by_id=priya.id, organization_id=org.id)
 
         if finish:
             remaining_done -= pts
@@ -193,6 +210,7 @@ for name, committed, completed, start_ago, end_ago in history:
             span = start_ago - end_ago
             day = past.start_date + timedelta(days=min(span, 1 + (n * span) // 6))
             db.add(models.ActivityLog(
+                organization_id=org.id,
                 ticket_id=t.id,
                 actor_id=priya.id,
                 action="status_changed",

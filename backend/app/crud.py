@@ -1,3 +1,4 @@
+import secrets
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -8,31 +9,117 @@ from sqlalchemy.orm import Session, joinedload
 from . import models, schemas, workflow
 from .security import hash_password
 
+
+def _generate_join_code() -> str:
+    # 8 hex chars, uppercased -- typeable, not easily confused (no visually
+    # ambiguous word list), and generated with secrets so it isn't guessable.
+    return secrets.token_hex(4).upper()
+
 # Gap left between adjacent cards. Dropping a card between two neighbours
 # averages their ranks, so a big gap means many inserts before the floats
 # get too close together to split.
 RANK_GAP = 1024.0
 
 
+# ---------- Organization CRUD ----------
+def get_organization(db: Session, organization_id: uuid.UUID) -> models.Organization | None:
+    return db.query(models.Organization).filter(models.Organization.id == organization_id).first()
+
+
+def get_organization_by_name(db: Session, name: str) -> models.Organization | None:
+    return (
+        db.query(models.Organization)
+        .filter(func.lower(models.Organization.name) == name.lower())
+        .first()
+    )
+
+
+def get_organization_by_join_code(db: Session, join_code: str) -> models.Organization | None:
+    return db.query(models.Organization).filter(models.Organization.join_code == join_code).first()
+
+
+def search_organizations(db: Session, name: str, limit: int = 10) -> list[models.Organization]:
+    """Name-only search for the 'join an existing organization' step -- deliberately
+    returns nothing but the name. Finding an org this way must never be enough to
+    get in; the join code is the actual gate."""
+    return (
+        db.query(models.Organization)
+        .filter(models.Organization.name.ilike(f"%{name}%"))
+        .order_by(models.Organization.name)
+        .limit(limit)
+        .all()
+    )
+
+
+def create_organization(db: Session, name: str, key_prefix: str) -> models.Organization:
+    org = models.Organization(
+        name=name.strip(),
+        key_prefix=key_prefix.strip().upper(),
+        join_code=_generate_join_code(),
+        next_ticket_number=1,
+    )
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+def rotate_join_code(db: Session, org: models.Organization) -> models.Organization:
+    """A leaked join code (posted in the wrong Slack channel, an ex-employee who
+    kept it) is only a problem until this is called -- old code stops working
+    immediately, current members are unaffected since they're already in."""
+    org.join_code = _generate_join_code()
+    db.commit()
+    db.refresh(org)
+    return org
+
+
 # ---------- User CRUD ----------
 def get_user_by_email(db: Session, email: str) -> models.User | None:
+    # Global, not org-scoped: email is unique across the whole product, and
+    # login has to find the account before it knows which org it belongs to.
     return db.query(models.User).filter(models.User.email == email).first()
 
 
-def get_user(db: Session, user_id: uuid.UUID) -> models.User | None:
-    return db.query(models.User).filter(models.User.id == user_id).first()
+def get_user(db: Session, user_id: uuid.UUID, organization_id: uuid.UUID | None = None) -> models.User | None:
+    query = db.query(models.User).filter(models.User.id == user_id)
+    if organization_id is not None:
+        query = query.filter(models.User.organization_id == organization_id)
+    return query.first()
 
 
-def get_all_users(db: Session) -> list[models.User]:
-    return db.query(models.User).order_by(models.User.full_name).all()
+def get_user_by_avatar_filename(db: Session, filename: str) -> models.User | None:
+    """Used when serving an avatar: the URL carries the stored filename, and we
+    need the owning row to check it belongs to the requester's organization —
+    the same pattern as `get_attachment_by_stored_name`."""
+    return (
+        db.query(models.User)
+        .filter(models.User.avatar_url == f"/uploads/avatars/{filename}")
+        .first()
+    )
 
 
-def count_users(db: Session) -> int:
-    return db.query(models.User).count()
+def get_all_users(db: Session, organization_id: uuid.UUID) -> list[models.User]:
+    return (
+        db.query(models.User)
+        .filter(models.User.organization_id == organization_id)
+        .order_by(models.User.full_name)
+        .all()
+    )
 
 
-def create_user(db: Session, user_in: schemas.UserCreate, role: models.UserRole) -> models.User:
+def count_users(db: Session, organization_id: uuid.UUID | None = None) -> int:
+    query = db.query(models.User)
+    if organization_id is not None:
+        query = query.filter(models.User.organization_id == organization_id)
+    return query.count()
+
+
+def create_user(
+    db: Session, user_in: schemas.UserCreate, role: models.UserRole, organization_id: uuid.UUID
+) -> models.User:
     db_user = models.User(
+        organization_id=organization_id,
         email=user_in.email,
         full_name=user_in.full_name,
         hashed_password=hash_password(user_in.password),
@@ -44,7 +131,9 @@ def create_user(db: Session, user_in: schemas.UserCreate, role: models.UserRole)
     return db_user
 
 
-def create_user_by_admin(db: Session, payload: schemas.UserCreateByAdmin) -> models.User:
+def create_user_by_admin(
+    db: Session, payload: schemas.UserCreateByAdmin, organization_id: uuid.UUID
+) -> models.User:
     """An admin adds a colleague with a temp password they hand over in person.
 
     must_change_password is set: the admin typed the password, so they know it,
@@ -52,6 +141,7 @@ def create_user_by_admin(db: Session, payload: schemas.UserCreateByAdmin) -> mod
     really theirs yet.
     """
     user = models.User(
+        organization_id=organization_id,
         email=payload.email,
         full_name=payload.full_name,
         hashed_password=hash_password(payload.temp_password),
@@ -116,7 +206,7 @@ def workload_band(open_tickets: int) -> str:
     return "busy"
 
 
-def user_workloads(db: Session) -> dict[uuid.UUID, int]:
+def user_workloads(db: Session, organization_id: uuid.UUID) -> dict[uuid.UUID, int]:
     """Open assigned tickets per user, in ONE grouped query.
 
     A per-user count would be N+1 behind every person-picker, which is exactly
@@ -125,6 +215,7 @@ def user_workloads(db: Session) -> dict[uuid.UUID, int]:
     rows = (
         db.query(models.Ticket.assignee_id, func.count(models.Ticket.id))
         .filter(
+            models.Ticket.organization_id == organization_id,
             models.Ticket.assignee_id.isnot(None),
             models.Ticket.status != models.TicketStatus.DONE,
             # A sub-task is work, but it's counted under its parent — including
@@ -137,8 +228,8 @@ def user_workloads(db: Session) -> dict[uuid.UUID, int]:
     return {user_id: count for user_id, count in rows}
 
 
-def attach_workloads(db: Session, users: list[models.User]) -> list[models.User]:
-    counts = user_workloads(db)
+def attach_workloads(db: Session, users: list[models.User], organization_id: uuid.UUID) -> list[models.User]:
+    counts = user_workloads(db, organization_id)
     for user in users:
         user.open_tickets = counts.get(user.id, 0)
         user.band = workload_band(user.open_tickets)
@@ -149,8 +240,15 @@ OPEN_STATUSES = (models.TicketStatus.BACKLOG, models.TicketStatus.TODO)
 WIP_STATUSES = (models.TicketStatus.IN_PROGRESS, models.TicketStatus.CODE_REVIEW)
 
 
-def user_stats(db: Session, user_id: uuid.UUID) -> dict:
-    tickets = db.query(models.Ticket).filter(models.Ticket.assignee_id == user_id).all()
+def user_stats(db: Session, user_id: uuid.UUID, organization_id: uuid.UUID) -> dict:
+    tickets = (
+        db.query(models.Ticket)
+        .filter(
+            models.Ticket.assignee_id == user_id,
+            models.Ticket.organization_id == organization_id,
+        )
+        .all()
+    )
 
     def count(statuses):
         return sum(1 for t in tickets if t.status in statuses)
@@ -172,8 +270,16 @@ def user_stats(db: Session, user_id: uuid.UUID) -> dict:
 # ---------- Activity log ----------
 def log_activity(db: Session, ticket_id: uuid.UUID, actor_id: uuid.UUID, action: str, details: str = None):
     """Stages a log entry. The caller commits, so the log and the change it
-    describes land in the same transaction (or neither does)."""
-    db.add(models.ActivityLog(ticket_id=ticket_id, actor_id=actor_id, action=action, details=details))
+    describes land in the same transaction (or neither does).
+
+    organization_id is looked up from the ticket rather than threaded through
+    every one of this function's many call sites -- the ticket may have only
+    just been flushed in the same transaction, which this query sees fine.
+    """
+    org_id = db.query(models.Ticket.organization_id).filter(models.Ticket.id == ticket_id).scalar()
+    db.add(models.ActivityLog(
+        organization_id=org_id, ticket_id=ticket_id, actor_id=actor_id, action=action, details=details
+    ))
 
 
 def get_activity_log(db: Session, ticket_id: uuid.UUID) -> list[models.ActivityLog]:
@@ -187,20 +293,33 @@ def get_activity_log(db: Session, ticket_id: uuid.UUID) -> list[models.ActivityL
 
 
 # ---------- Label CRUD ----------
-def get_labels(db: Session) -> list[models.Label]:
-    return db.query(models.Label).order_by(models.Label.name).all()
+def get_labels(db: Session, organization_id: uuid.UUID) -> list[models.Label]:
+    return (
+        db.query(models.Label)
+        .filter(models.Label.organization_id == organization_id)
+        .order_by(models.Label.name)
+        .all()
+    )
 
 
-def get_label(db: Session, label_id: uuid.UUID) -> models.Label | None:
-    return db.query(models.Label).filter(models.Label.id == label_id).first()
+def get_label(db: Session, label_id: uuid.UUID, organization_id: uuid.UUID) -> models.Label | None:
+    return (
+        db.query(models.Label)
+        .filter(models.Label.id == label_id, models.Label.organization_id == organization_id)
+        .first()
+    )
 
 
-def get_label_by_name(db: Session, name: str) -> models.Label | None:
-    return db.query(models.Label).filter(func.lower(models.Label.name) == name.lower()).first()
+def get_label_by_name(db: Session, name: str, organization_id: uuid.UUID) -> models.Label | None:
+    return (
+        db.query(models.Label)
+        .filter(func.lower(models.Label.name) == name.lower(), models.Label.organization_id == organization_id)
+        .first()
+    )
 
 
-def create_label(db: Session, label_in: schemas.LabelCreate) -> models.Label:
-    label = models.Label(name=label_in.name, color=label_in.color)
+def create_label(db: Session, label_in: schemas.LabelCreate, organization_id: uuid.UUID) -> models.Label:
+    label = models.Label(organization_id=organization_id, name=label_in.name, color=label_in.color)
     db.add(label)
     db.commit()
     db.refresh(label)
@@ -221,16 +340,24 @@ def delete_label(db: Session, label: models.Label) -> None:
 
 
 # ---------- Sprint CRUD ----------
-def get_sprints(db: Session) -> list[models.Sprint]:
-    return db.query(models.Sprint).order_by(models.Sprint.created_at.desc()).all()
+def get_sprints(db: Session, organization_id: uuid.UUID) -> list[models.Sprint]:
+    return (
+        db.query(models.Sprint)
+        .filter(models.Sprint.organization_id == organization_id)
+        .order_by(models.Sprint.created_at.desc())
+        .all()
+    )
 
 
-def get_sprint(db: Session, sprint_id: uuid.UUID) -> models.Sprint | None:
-    return db.query(models.Sprint).filter(models.Sprint.id == sprint_id).first()
+def get_sprint(db: Session, sprint_id: uuid.UUID, organization_id: uuid.UUID | None = None) -> models.Sprint | None:
+    query = db.query(models.Sprint).filter(models.Sprint.id == sprint_id)
+    if organization_id is not None:
+        query = query.filter(models.Sprint.organization_id == organization_id)
+    return query.first()
 
 
-def create_sprint(db: Session, sprint_in: schemas.SprintCreate) -> models.Sprint:
-    sprint = models.Sprint(**sprint_in.model_dump())
+def create_sprint(db: Session, sprint_in: schemas.SprintCreate, organization_id: uuid.UUID) -> models.Sprint:
+    sprint = models.Sprint(organization_id=organization_id, **sprint_in.model_dump())
     db.add(sprint)
     db.commit()
     db.refresh(sprint)
@@ -288,7 +415,7 @@ def _completion_dates(db: Session, tickets: list[models.Ticket]) -> dict[uuid.UU
 
 
 def sprint_stats(db: Session, sprint: models.Sprint) -> dict:
-    tickets = get_tickets(db, sprint_id=sprint.id)
+    tickets = get_tickets(db, sprint.organization_id, sprint_id=sprint.id)
     done = [t for t in tickets if t.status == models.TicketStatus.DONE]
     return {
         "total_points": sum(t.story_points or 0 for t in tickets),
@@ -299,7 +426,7 @@ def sprint_stats(db: Session, sprint: models.Sprint) -> dict:
 
 
 def sprint_burndown(db: Session, sprint: models.Sprint) -> dict:
-    tickets = get_tickets(db, sprint_id=sprint.id)
+    tickets = get_tickets(db, sprint.organization_id, sprint_id=sprint.id)
     total = sum(t.story_points or 0 for t in tickets)
 
     start = sprint.start_date or (sprint.created_at.date() if sprint.created_at else date.today())
@@ -336,13 +463,13 @@ def sprint_burndown(db: Session, sprint: models.Sprint) -> dict:
     return {"sprint": sprint, "total_points": total, "points": series}
 
 
-def workflow_report(db: Session) -> list[dict]:
+def workflow_report(db: Session, organization_id: uuid.UUID) -> list[dict]:
     """Every ticket in the cross-team workflow: where it is, how far it's
     travelled, and how long it's been sitting where it is."""
     now = datetime.utcnow()
 
     tickets = (
-        _ticket_query(db)
+        _ticket_query(db, organization_id)
         .filter(models.Ticket.current_team_id.isnot(None))
         .order_by(models.Ticket.created_at.desc())
         .all()
@@ -372,7 +499,7 @@ def workflow_report(db: Session) -> list[dict]:
     return rows
 
 
-def team_holding_times(db: Session) -> list[dict]:
+def team_holding_times(db: Session, organization_id: uuid.UUID) -> list[dict]:
     """How long each team sits on a ticket before passing it on.
 
     A hold that hasn't ended yet is EXCLUDED from the average — otherwise a
@@ -383,6 +510,7 @@ def team_holding_times(db: Session) -> list[dict]:
     now = datetime.utcnow()
     handoffs = (
         db.query(models.TicketHandoff)
+        .filter(models.TicketHandoff.organization_id == organization_id)
         .order_by(models.TicketHandoff.ticket_id, models.TicketHandoff.sent_at)
         .all()
     )
@@ -413,7 +541,7 @@ def team_holding_times(db: Session) -> list[dict]:
                 open_holds[team_id] = open_holds.get(team_id, 0) + 1
 
     rows = []
-    for team in get_teams(db):
+    for team in get_teams(db, organization_id):
         durations = holds.get(team.id, [])
         rows.append({
             "team": team,
@@ -426,12 +554,12 @@ def team_holding_times(db: Session) -> list[dict]:
     return rows
 
 
-def velocity(db: Session) -> dict:
-    sprints = sorted(get_sprints(db), key=lambda s: (s.start_date or date.min, s.created_at))
+def velocity(db: Session, organization_id: uuid.UUID) -> dict:
+    sprints = sorted(get_sprints(db, organization_id), key=lambda s: (s.start_date or date.min, s.created_at))
 
     entries = []
     for sprint in sprints:
-        tickets = get_tickets(db, sprint_id=sprint.id)
+        tickets = get_tickets(db, organization_id, sprint_id=sprint.id)
         done = [t for t in tickets if t.status == models.TicketStatus.DONE]
         entries.append({
             "sprint_id": sprint.id,
@@ -450,40 +578,52 @@ def velocity(db: Session) -> dict:
 
 
 # ---------- Teams ----------
-def get_teams(db: Session) -> list[models.Team]:
-    return db.query(models.Team).order_by(models.Team.name).all()
+def get_teams(db: Session, organization_id: uuid.UUID) -> list[models.Team]:
+    return (
+        db.query(models.Team)
+        .filter(models.Team.organization_id == organization_id)
+        .order_by(models.Team.name)
+        .all()
+    )
 
 
-def get_team(db: Session, team_id: uuid.UUID) -> models.Team | None:
-    return db.query(models.Team).filter(models.Team.id == team_id).first()
+def get_team(db: Session, team_id: uuid.UUID, organization_id: uuid.UUID | None = None) -> models.Team | None:
+    query = db.query(models.Team).filter(models.Team.id == team_id)
+    if organization_id is not None:
+        query = query.filter(models.Team.organization_id == organization_id)
+    return query.first()
 
 
-def get_team_by_kind(db: Session, kind: models.TeamKind) -> models.Team | None:
+def get_team_by_kind(db: Session, organization_id: uuid.UUID, kind: models.TeamKind) -> models.Team | None:
     """First team of a given kind. Used to route 'send to Testing' without
     hardcoding a team name."""
     return (
         db.query(models.Team)
-        .filter(models.Team.kind == kind)
+        .filter(models.Team.organization_id == organization_id, models.Team.kind == kind)
         .order_by(models.Team.created_at)
         .first()
     )
 
 
-def get_team_by_name(db: Session, name: str) -> models.Team | None:
-    return db.query(models.Team).filter(func.lower(models.Team.name) == name.lower()).first()
+def get_team_by_name(db: Session, name: str, organization_id: uuid.UUID) -> models.Team | None:
+    return (
+        db.query(models.Team)
+        .filter(func.lower(models.Team.name) == name.lower(), models.Team.organization_id == organization_id)
+        .first()
+    )
 
 
-def get_team_members(db: Session, team_id: uuid.UUID) -> list[models.User]:
+def get_team_members(db: Session, team_id: uuid.UUID, organization_id: uuid.UUID) -> list[models.User]:
     return (
         db.query(models.User)
-        .filter(models.User.team_id == team_id)
+        .filter(models.User.team_id == team_id, models.User.organization_id == organization_id)
         .order_by(models.User.full_name)
         .all()
     )
 
 
-def create_team(db: Session, payload: schemas.TeamCreate) -> models.Team:
-    team = models.Team(**payload.model_dump())
+def create_team(db: Session, payload: schemas.TeamCreate, organization_id: uuid.UUID) -> models.Team:
+    team = models.Team(organization_id=organization_id, **payload.model_dump())
     db.add(team)
     db.commit()
     db.refresh(team)
@@ -518,7 +658,7 @@ def _contribution_row(ticket: models.Ticket, when) -> dict:
         "status": ticket.status,
         "priority": ticket.priority,
         "ticket_type": ticket.ticket_type,
-        "component": ticket.component,
+        "product": ticket.product,
         "client_name": ticket.client_name,
         "assignee": ticket.assignee,
         "contributed_at": when,
@@ -538,8 +678,7 @@ def user_contributions(db: Session, user: models.User) -> dict:
     """
     my_handoffs = (
         db.query(models.TicketHandoff)
-        .options(joinedload(models.TicketHandoff.ticket).joinedload(models.Ticket.component),
-                 joinedload(models.TicketHandoff.ticket).joinedload(models.Ticket.assignee))
+        .options(joinedload(models.TicketHandoff.ticket).joinedload(models.Ticket.assignee))
         .filter(models.TicketHandoff.from_user_id == user.id)
         .order_by(models.TicketHandoff.sent_at.desc())
         .all()
@@ -571,7 +710,7 @@ def user_contributions(db: Session, user: models.User) -> dict:
 
     # On their desk right now — assigned and not resolved. The actionable list.
     open_assigned = (
-        _ticket_query(db)
+        _ticket_query(db, user.organization_id)
         .filter(
             models.Ticket.assignee_id == user.id,
             models.Ticket.status != models.TicketStatus.DONE,
@@ -623,6 +762,7 @@ def user_workflow_profile(db: Session, user: models.User) -> dict:
     reported = (
         db.query(models.Ticket)
         .filter(
+            models.Ticket.organization_id == user.organization_id,
             models.Ticket.created_by_id == user.id,
             models.Ticket.parent_id.is_(None),
             models.Ticket.handoffs.any(),   # entered the cross-team workflow
@@ -685,7 +825,7 @@ def user_workflow_profile(db: Session, user: models.User) -> dict:
         })
     history.sort(key=lambda r: r["last_involved_at"], reverse=True)
 
-    open_count = user_workloads(db).get(user.id, 0)
+    open_count = user_workloads(db, user.organization_id).get(user.id, 0)
 
     return {
         "user": user,
@@ -758,7 +898,7 @@ def _resolve_handoff_target(
         return None, None
 
     if spec.target_kind is None:
-        reporter = get_user(db, ticket.created_by_id)
+        reporter = get_user(db, ticket.created_by_id, ticket.organization_id)
         if not reporter:
             raise ValueError(
                 "The person who raised this no longer has an account, so there's nobody to "
@@ -776,7 +916,7 @@ def _resolve_handoff_target(
         # "Unassigned". So park it with the Support team, which is the team that
         # closes tickets anyway. The reporter can still act on it because they're
         # the assignee, team or no team.
-        team = reporter.team or get_team_by_kind(db, models.TeamKind.SUPPORT)
+        team = reporter.team or get_team_by_kind(db, ticket.organization_id, models.TeamKind.SUPPORT)
         if not team:
             raise ValueError(
                 f"{reporter.full_name} isn't on a team, and there's no Support team to fall "
@@ -787,7 +927,7 @@ def _resolve_handoff_target(
     if not to_user_id:
         raise ValueError("This action needs a person to hand the ticket to")
 
-    target = get_user(db, to_user_id)
+    target = get_user(db, to_user_id, ticket.organization_id)
     if not target:
         raise ValueError("That person doesn't exist")
     if not target.team:
@@ -821,6 +961,7 @@ def perform_handoff(
         )
 
     handoff = models.TicketHandoff(
+        organization_id=ticket.organization_id,
         ticket_id=ticket.id,
         from_team_id=ticket.current_team_id,
         from_user_id=actor.id,
@@ -840,7 +981,7 @@ def perform_handoff(
         ticket.assignee_id = target_user.id if target_user else None
 
     if spec.resulting_status != ticket.status:
-        ticket.rank = _top_rank(db, spec.resulting_status)
+        ticket.rank = _top_rank(db, ticket.organization_id, spec.resulting_status)
         _sync_resolved_at(ticket, spec.resulting_status)
         ticket.status = spec.resulting_status
 
@@ -879,6 +1020,7 @@ def raise_into_workflow(
 ) -> models.Ticket:
     """The initial handoff: from nobody, to the first handler."""
     handoff = models.TicketHandoff(
+        organization_id=ticket.organization_id,
         ticket_id=ticket.id,
         from_team_id=actor.team_id,
         from_user_id=actor.id,
@@ -912,7 +1054,7 @@ def attach_workflow(db: Session, tickets: list[models.Ticket], viewer: models.Us
     """
     # Resolve target teams once, not once per ticket.
     team_by_kind = {
-        kind: get_team_by_kind(db, kind)
+        kind: get_team_by_kind(db, viewer.organization_id, kind)
         for kind in (models.TeamKind.TESTING, models.TeamKind.DEVELOPMENT, models.TeamKind.SUPPORT)
     }
 
@@ -934,87 +1076,133 @@ def attach_workflow(db: Session, tickets: list[models.Ticket], viewer: models.Us
 
 
 # ---------- Components ----------
-def get_components(db: Session) -> list[models.Component]:
-    return db.query(models.Component).order_by(models.Component.name).all()
+def get_parent_tags(db: Session, organization_id: uuid.UUID) -> list[models.ParentTag]:
+    return (
+        db.query(models.ParentTag)
+        .filter(models.ParentTag.organization_id == organization_id)
+        .order_by(models.ParentTag.name)
+        .all()
+    )
 
 
-def get_component(db: Session, component_id: uuid.UUID) -> models.Component | None:
-    return db.query(models.Component).filter(models.Component.id == component_id).first()
+def get_parent_tag(
+    db: Session, tag_id: uuid.UUID, organization_id: uuid.UUID | None = None
+) -> models.ParentTag | None:
+    query = db.query(models.ParentTag).filter(models.ParentTag.id == tag_id)
+    if organization_id is not None:
+        query = query.filter(models.ParentTag.organization_id == organization_id)
+    return query.first()
 
 
-def get_component_by_name(db: Session, name: str) -> models.Component | None:
-    return db.query(models.Component).filter(
-        func.lower(models.Component.name) == name.lower()
+def get_parent_tag_by_name(db: Session, name: str, organization_id: uuid.UUID) -> models.ParentTag | None:
+    return db.query(models.ParentTag).filter(
+        func.lower(models.ParentTag.name) == name.lower(),
+        models.ParentTag.organization_id == organization_id,
     ).first()
 
 
-def create_component(db: Session, payload: schemas.ComponentCreate) -> models.Component:
-    component = models.Component(**payload.model_dump())
-    db.add(component)
+def create_parent_tag(db: Session, payload: schemas.ParentTagCreate, organization_id: uuid.UUID) -> models.ParentTag:
+    tag = models.ParentTag(organization_id=organization_id, **payload.model_dump())
+    db.add(tag)
     db.commit()
-    db.refresh(component)
-    return component
+    db.refresh(tag)
+    return tag
 
 
-def update_component(
-    db: Session, component: models.Component, payload: schemas.ComponentUpdate
-) -> models.Component:
+def update_parent_tag(
+    db: Session, tag: models.ParentTag, payload: schemas.ParentTagUpdate
+) -> models.ParentTag:
     for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(component, field, value)
+        setattr(tag, field, value)
     db.commit()
-    db.refresh(component)
-    return component
+    db.refresh(tag)
+    return tag
 
 
-def delete_component(db: Session, component: models.Component) -> None:
-    db.delete(component)
+def delete_parent_tag(db: Session, tag: models.ParentTag) -> None:
+    # ON DELETE SET NULL frees the grouped tickets — deleting the grouping must
+    # never delete the work grouped under it.
+    db.delete(tag)
     db.commit()
 
 
-def component_stats(db: Session) -> list[dict]:
-    """Per-component load, including how many tickets are past their SLA — the
-    'which product is on fire right now' view."""
-    policies = get_sla_policies(db)
+def get_or_create_parent_tag_for_ticket(db: Session, hub_ticket: models.Ticket) -> models.ParentTag:
+    """Let any ticket act as a hub other tickets link under, with no separate
+    "create a tag first" step. Reuses the hub ticket's own id as the parent_tags
+    primary key -- same id-reuse trick the Epic -> Parent Tag migration used, so
+    a ticket and "the tag for that ticket" are always trivially the same row to
+    find. tickets.id has no live FK into parent_tags (or vice versa), so the
+    hub ticket keeps existing as an ordinary ticket alongside it."""
+    tag = db.query(models.ParentTag).filter(models.ParentTag.id == hub_ticket.id).first()
+    if tag:
+        return tag
+    name = f"{hub_ticket.key}: {hub_ticket.title}"[:60]
+    tag = models.ParentTag(
+        id=hub_ticket.id, organization_id=hub_ticket.organization_id,
+        name=name, description=None, color="#8B5CF6",
+    )
+    db.add(tag)
+    db.commit()
+    db.refresh(tag)
+    return tag
+
+
+def parent_tag_stats(db: Session, organization_id: uuid.UUID) -> list[dict]:
+    """Each parent tag with its rolled-up numbers and the aggregated set of
+    labels used across every ticket grouped under it."""
     rows = []
+    for tag in get_parent_tags(db, organization_id):
+        tickets = (
+            db.query(models.Ticket)
+            .options(joinedload(models.Ticket.labels))
+            .filter(models.Ticket.parent_tag_id == tag.id)
+            .all()
+        )
+        done = sum(1 for t in tickets if t.status == models.TicketStatus.DONE)
 
-    for component in get_components(db):
-        tickets = db.query(models.Ticket).filter(
-            models.Ticket.component_id == component.id
-        ).all()
-        open_tickets = [t for t in tickets if t.status != models.TicketStatus.DONE]
+        # Labels rolled up across the grouped tickets, de-duplicated by id.
+        labels = {}
+        for t in tickets:
+            for label in t.labels:
+                labels[label.id] = label
+
         rows.append({
-            "id": component.id,
-            "name": component.name,
-            "description": component.description,
-            "color": component.color,
-            "lead": component.lead,
-            "open_tickets": len(open_tickets),
+            "id": tag.id,
+            "name": tag.name,
+            "description": tag.description,
+            "color": tag.color,
             "total_tickets": len(tickets),
-            "breached": sum(1 for t in tickets if _sla_for(t, policies) and _sla_for(t, policies)["breached"]),
+            "done_tickets": done,
+            "percent": round(done / len(tickets) * 100) if tickets else 0,
+            "labels": list(labels.values()),
         })
     return rows
 
 
 # ---------- SLA ----------
-def get_sla_policies(db: Session) -> dict[models.TicketPriority, int | None]:
+def get_sla_policies(db: Session, organization_id: uuid.UUID) -> dict[models.TicketPriority, int | None]:
     return {
         row.priority: row.threshold_hours
-        for row in db.query(models.SLAPolicy).all()
+        for row in db.query(models.SLAPolicy).filter(models.SLAPolicy.organization_id == organization_id).all()
     }
 
 
-def list_sla_policies(db: Session) -> list[models.SLAPolicy]:
-    return db.query(models.SLAPolicy).all()
+def list_sla_policies(db: Session, organization_id: uuid.UUID) -> list[models.SLAPolicy]:
+    return db.query(models.SLAPolicy).filter(models.SLAPolicy.organization_id == organization_id).all()
 
 
 def set_sla_policy(
-    db: Session, priority: models.TicketPriority, threshold_hours: int | None
+    db: Session, organization_id: uuid.UUID, priority: models.TicketPriority, threshold_hours: int | None
 ) -> models.SLAPolicy:
-    policy = db.query(models.SLAPolicy).filter(models.SLAPolicy.priority == priority).first()
+    policy = (
+        db.query(models.SLAPolicy)
+        .filter(models.SLAPolicy.organization_id == organization_id, models.SLAPolicy.priority == priority)
+        .first()
+    )
     if policy:
         policy.threshold_hours = threshold_hours
     else:
-        policy = models.SLAPolicy(priority=priority, threshold_hours=threshold_hours)
+        policy = models.SLAPolicy(organization_id=organization_id, priority=priority, threshold_hours=threshold_hours)
         db.add(policy)
     db.commit()
     db.refresh(policy)
@@ -1073,43 +1261,17 @@ def _sla_for(ticket: models.Ticket, policies: dict) -> dict | None:
     }
 
 
-def _epic_progress(db: Session, epic: models.Ticket) -> dict:
-    """'6/10 done' for an epic, derived from its children on every read."""
-    children = db.query(models.Ticket).filter(models.Ticket.epic_id == epic.id).all()
-    done = [c for c in children if c.status == models.TicketStatus.DONE]
-
-    points_total = sum(c.story_points or 0 for c in children)
-    points_done = sum(c.story_points or 0 for c in done)
-
-    # Prefer points when the epic is estimated — a 13-point story finishing is
-    # more progress than a 1-point one, and a ticket count hides that.
-    if points_total:
-        percent = round(points_done / points_total * 100)
-    elif children:
-        percent = round(len(done) / len(children) * 100)
-    else:
-        percent = 0
-
-    return {
-        "done": len(done),
-        "total": len(children),
-        "points_done": points_done,
-        "points_total": points_total,
-        "percent": percent,
-    }
-
-
 def attach_derived(db: Session, tickets: list[models.Ticket]) -> list[models.Ticket]:
-    """Hang the computed SLA clock and epic progress off each ticket so
-    TicketOut can serialise them. Neither is ever stored."""
-    policies = get_sla_policies(db)
+    """Hang the computed SLA clock off each ticket so TicketOut can serialise it.
+    Never stored — see _sla_for."""
+    if not tickets:
+        return tickets
+    # All tickets in one call are already scoped to a single org by the caller
+    # (every list/get path filters by organization_id) — SLA policies are read
+    # for that one org rather than per-ticket.
+    policies = get_sla_policies(db, tickets[0].organization_id)
     for ticket in tickets:
         ticket.sla = _sla_for(ticket, policies)
-        ticket.progress = (
-            _epic_progress(db, ticket)
-            if ticket.ticket_type == models.TicketType.EPIC
-            else None
-        )
     return tickets
 
 
@@ -1127,31 +1289,33 @@ def _sync_resolved_at(ticket: models.Ticket, new_status: models.TicketStatus) ->
 
 
 # ---------- Ticket CRUD ----------
-def _ticket_query(db: Session):
+def _ticket_query(db: Session, organization_id: uuid.UUID):
     return db.query(models.Ticket).options(
         joinedload(models.Ticket.assignee),
         joinedload(models.Ticket.reporter),
-    )
+    ).filter(models.Ticket.organization_id == organization_id)
 
 
 def get_tickets(
     db: Session,
+    organization_id: uuid.UUID,
     status: Optional[models.TicketStatus] = None,
     assignee_id: Optional[uuid.UUID] = None,
     priority: Optional[models.TicketPriority] = None,
     ticket_type: Optional[models.TicketType] = None,
     sprint_id: Optional[uuid.UUID] = None,
-    epic_id: Optional[uuid.UUID] = None,
+    parent_tag_id: Optional[uuid.UUID] = None,
     label_id: Optional[uuid.UUID] = None,
-    component_id: Optional[uuid.UUID] = None,
+    product: Optional[str] = None,
     client_name: Optional[str] = None,
     current_team_id: Optional[uuid.UUID] = None,
     breached: Optional[bool] = None,
     watcher_id: Optional[uuid.UUID] = None,
+    reporter_id: Optional[uuid.UUID] = None,
     include_subtasks: bool = False,
     search: Optional[str] = None,
 ) -> list[models.Ticket]:
-    query = _ticket_query(db)
+    query = _ticket_query(db, organization_id)
 
     # Sub-tasks live inside their parent, not as loose cards on the board.
     # Showing them at top level would double-count the work.
@@ -1168,16 +1332,19 @@ def get_tickets(
         query = query.filter(models.Ticket.ticket_type == ticket_type)
     if sprint_id is not None:
         query = query.filter(models.Ticket.sprint_id == sprint_id)
-    if epic_id is not None:
-        query = query.filter(models.Ticket.epic_id == epic_id)
+    if parent_tag_id is not None:
+        query = query.filter(models.Ticket.parent_tag_id == parent_tag_id)
     if label_id is not None:
         query = query.filter(models.Ticket.labels.any(models.Label.id == label_id))
-    if component_id is not None:
-        query = query.filter(models.Ticket.component_id == component_id)
+    if product:
+        query = query.filter(models.Ticket.product == product)
     if current_team_id is not None:
         query = query.filter(models.Ticket.current_team_id == current_team_id)
     if watcher_id is not None:
         query = query.filter(models.Ticket.watchers.any(models.User.id == watcher_id))
+    if reporter_id is not None:
+        # Clients see only their own submissions.
+        query = query.filter(models.Ticket.created_by_id == reporter_id)
     if client_name:
         query = query.filter(models.Ticket.client_name.ilike(f"%{client_name}%"))
     if search:
@@ -1203,17 +1370,17 @@ def get_tickets(
     return rows
 
 
-def get_ticket(db: Session, ticket_id: uuid.UUID) -> models.Ticket | None:
-    ticket = _ticket_query(db).filter(models.Ticket.id == ticket_id).first()
+def get_ticket(db: Session, ticket_id: uuid.UUID, organization_id: uuid.UUID) -> models.Ticket | None:
+    ticket = _ticket_query(db, organization_id).filter(models.Ticket.id == ticket_id).first()
     if ticket:
         attach_sla(db, [ticket])
     return ticket
 
 
-def get_client_names(db: Session) -> list[str]:
+def get_client_names(db: Session, organization_id: uuid.UUID) -> list[str]:
     rows = (
         db.query(models.Ticket.client_name)
-        .filter(models.Ticket.client_name.isnot(None))
+        .filter(models.Ticket.client_name.isnot(None), models.Ticket.organization_id == organization_id)
         .distinct()
         .order_by(models.Ticket.client_name)
         .all()
@@ -1221,33 +1388,82 @@ def get_client_names(db: Session) -> list[str]:
     return [r[0] for r in rows]
 
 
-def _resolve_labels(db: Session, label_ids: list[uuid.UUID]) -> list[models.Label]:
+def _resolve_labels(db: Session, organization_id: uuid.UUID, label_ids: list[uuid.UUID]) -> list[models.Label]:
     if not label_ids:
         return []
-    return db.query(models.Label).filter(models.Label.id.in_(label_ids)).all()
+    return (
+        db.query(models.Label)
+        .filter(models.Label.id.in_(label_ids), models.Label.organization_id == organization_id)
+        .all()
+    )
 
 
-def _top_rank(db: Session, status: models.TicketStatus) -> float:
-    """New cards land at the top of their column."""
-    lowest = db.query(func.min(models.Ticket.rank)).filter(models.Ticket.status == status).scalar()
+def _allocate_ticket_number(db: Session, organization_id: uuid.UUID) -> int:
+    """Claim the next ticket number for this org under a row lock -- without
+    FOR UPDATE, two concurrent creates in the same org could read the same
+    'next' value and collide. Each org counts from its own 1, independent of
+    every other org's ticket volume."""
+    org = (
+        db.query(models.Organization)
+        .filter(models.Organization.id == organization_id)
+        .with_for_update()
+        .one()
+    )
+    number = org.next_ticket_number
+    org.next_ticket_number = number + 1
+    return number
+
+
+def _top_rank(db: Session, organization_id: uuid.UUID, status: models.TicketStatus) -> float:
+    """New cards land at the top of their column, within their own org."""
+    lowest = (
+        db.query(func.min(models.Ticket.rank))
+        .filter(models.Ticket.organization_id == organization_id, models.Ticket.status == status)
+        .scalar()
+    )
     return RANK_GAP if lowest is None else lowest - RANK_GAP
 
 
-def create_ticket(db: Session, ticket_in: schemas.TicketCreate, created_by_id: uuid.UUID) -> models.Ticket:
-    # label_ids is a relationship, and the route_* fields drive the workflow
-    # handoff rather than being columns on the ticket.
-    data = ticket_in.model_dump(exclude={"label_ids", "route_to_user_id", "route_note"})
+def create_ticket(
+    db: Session, ticket_in: schemas.TicketCreate, created_by_id: uuid.UUID, organization_id: uuid.UUID
+) -> models.Ticket:
+    # label_ids is a relationship, route_* drives the workflow handoff, and
+    # parent_ticket_id isn't a column at all -- it's resolved into
+    # parent_tag_id below, same field the rest of the model already uses.
+    data = ticket_in.model_dump(
+        exclude={"label_ids", "route_to_user_id", "route_note", "parent_ticket_id"}
+    )
+    if ticket_in.parent_ticket_id:
+        hub = (
+            db.query(models.Ticket)
+            .filter(models.Ticket.id == ticket_in.parent_ticket_id, models.Ticket.organization_id == organization_id)
+            .first()
+        )
+        if not hub:
+            raise ValueError("The ticket you're linking under doesn't exist.")
+        data["parent_tag_id"] = get_or_create_parent_tag_for_ticket(db, hub).id
+
+    # Cross-references must stay inside the same org, same as update_ticket.
+    if data.get("assignee_id") and not get_user(db, data["assignee_id"], organization_id):
+        raise ValueError("That assignee doesn't exist.")
+    if data.get("sprint_id") and not get_sprint(db, data["sprint_id"], organization_id):
+        raise ValueError("That sprint doesn't exist.")
+    if data.get("parent_tag_id") and not get_parent_tag(db, data["parent_tag_id"], organization_id):
+        raise ValueError("That parent tag doesn't exist.")
+
     db_ticket = models.Ticket(
         **data,
+        organization_id=organization_id,
+        ticket_number=_allocate_ticket_number(db, organization_id),
         created_by_id=created_by_id,
-        rank=_top_rank(db, ticket_in.status),
+        rank=_top_rank(db, organization_id, ticket_in.status),
     )
-    db_ticket.labels = _resolve_labels(db, ticket_in.label_ids)
+    db_ticket.labels = _resolve_labels(db, organization_id, ticket_in.label_ids)
 
     _sync_resolved_at(db_ticket, ticket_in.status)
 
     db.add(db_ticket)
-    db.flush()  # assigns id + ticket_number so the log can reference them
+    db.flush()  # assigns id so the log can reference it
     log_activity(db, db_ticket.id, created_by_id, "created", f"Created {db_ticket.key}")
     db.commit()
     db.refresh(db_ticket)
@@ -1264,32 +1480,52 @@ TRACKED_FIELDS = {
     "status": "status",
     "priority": "priority",
     "ticket_type": "type",
+    "task_category": "category",
     "story_points": "story points",
     "assignee_id": "assignee",
     "sprint_id": "sprint",
-    "epic_id": "epic",
+    "parent_tag_id": "parent tag",
     "parent_id": "parent",
-    "component_id": "component",
+    "product": "product",
     "client_name": "client",
+    "start_date": "start date",
     "due_date": "due date",
+    "environment_stage": "environment",
+    # Free-text bug fields are tracked as changed/not, never diffed in the log —
+    # a full before/after of a 2000-char field would be unreadable noise.
 }
 
 
-def _display(db: Session, field: str, value) -> str:
+# Free-text bug-report fields: logged as "updated", never diffed — see the note
+# above. Kept separate from TRACKED_FIELDS so _display (which assumes it can
+# render the actual value) is never asked to render one of these.
+FREE_TEXT_BUG_FIELDS = {
+    "steps_to_reproduce": "steps to reproduce",
+    "expected_behavior": "expected behavior",
+    "actual_behavior": "actual behavior",
+    "browser_version": "browser/version",
+}
+
+
+def _display(db: Session, organization_id: uuid.UUID, field: str, value) -> str:
     """Render a field value the way a human would say it, not as a raw UUID."""
     if value is None or value == "":
         return "none"
     if field == "assignee_id":
-        user = get_user(db, value)
+        user = get_user(db, value, organization_id)
         return user.full_name if user else "unknown"
-    if field == "component_id":
-        component = get_component(db, value)
-        return component.name if component else "unknown"
+    if field == "parent_tag_id":
+        tag = get_parent_tag(db, value, organization_id)
+        return tag.name if tag else "unknown"
     if field == "sprint_id":
-        sprint = get_sprint(db, value)
+        sprint = get_sprint(db, value, organization_id)
         return sprint.name if sprint else "unknown"
-    if field in ("epic_id", "parent_id"):
-        other = db.query(models.Ticket).filter(models.Ticket.id == value).first()
+    if field == "parent_id":
+        other = (
+            db.query(models.Ticket)
+            .filter(models.Ticket.id == value, models.Ticket.organization_id == organization_id)
+            .first()
+        )
         return other.key if other else "unknown"
     if hasattr(value, "value"):  # an enum
         return value.value
@@ -1323,21 +1559,56 @@ def update_ticket(
     update_data = ticket_in.model_dump(exclude_unset=True)
     label_ids = update_data.pop("label_ids", None)
 
+    # Same resolution as create_ticket: picking an existing ticket to link
+    # under isn't a column, it's shorthand for "find or create that ticket's
+    # backing tag, then set parent_tag_id to it." Wins over a raw
+    # parent_tag_id sent in the same request (the UI never sends both, but
+    # if it ever does, "link under this ticket" is the more specific ask).
+    parent_ticket_id = update_data.pop("parent_ticket_id", None)
+    if parent_ticket_id:
+        if parent_ticket_id == ticket.id:
+            raise ValueError("A ticket can't be linked under itself.")
+        hub = (
+            db.query(models.Ticket)
+            .filter(models.Ticket.id == parent_ticket_id, models.Ticket.organization_id == ticket.organization_id)
+            .first()
+        )
+        if not hub:
+            raise ValueError("The ticket you're linking under doesn't exist.")
+        update_data["parent_tag_id"] = get_or_create_parent_tag_for_ticket(db, hub).id
+
     _reject_workflow_owned_edits(ticket, update_data)
+
+    # Cross-references must stay inside the same org — otherwise a ticket
+    # could end up assigned to, sprinted with, or nested under a row that
+    # belongs to somebody else's workspace entirely.
+    if update_data.get("assignee_id") and not get_user(db, update_data["assignee_id"], ticket.organization_id):
+        raise ValueError("That assignee doesn't exist.")
+    if update_data.get("sprint_id") and not get_sprint(db, update_data["sprint_id"], ticket.organization_id):
+        raise ValueError("That sprint doesn't exist.")
+    if update_data.get("parent_tag_id") and not get_parent_tag(db, update_data["parent_tag_id"], ticket.organization_id):
+        raise ValueError("That parent tag doesn't exist.")
 
     for field, new_value in update_data.items():
         old_value = getattr(ticket, field)
-        if new_value == old_value or field not in TRACKED_FIELDS:
+        if new_value == old_value:
+            continue
+        if field in FREE_TEXT_BUG_FIELDS:
+            log_activity(db, ticket.id, actor_id, f"{field}_updated",
+                         f"{FREE_TEXT_BUG_FIELDS[field]} updated")
+            continue
+        if field not in TRACKED_FIELDS:
             continue
 
         log_activity(
             db, ticket.id, actor_id, f"{TRACKED_FIELDS[field]}_changed",
-            f"{_display(db, field, old_value)} -> {_display(db, field, new_value)}",
+            f"{_display(db, ticket.organization_id, field, old_value)} -> "
+            f"{_display(db, ticket.organization_id, field, new_value)}",
         )
 
     if "status" in update_data and update_data["status"] != ticket.status:
         # Moving column via the edit form (not drag) — send it to the top.
-        ticket.rank = _top_rank(db, update_data["status"])
+        ticket.rank = _top_rank(db, ticket.organization_id, update_data["status"])
         _sync_resolved_at(ticket, update_data["status"])
 
     for field, value in update_data.items():
@@ -1345,7 +1616,7 @@ def update_ticket(
 
     if label_ids is not None:
         before = {l.name for l in ticket.labels}
-        ticket.labels = _resolve_labels(db, label_ids)
+        ticket.labels = _resolve_labels(db, ticket.organization_id, label_ids)
         after = {l.name for l in ticket.labels}
         if before != after:
             log_activity(db, ticket.id, actor_id, "labels_changed",
@@ -1370,6 +1641,8 @@ def create_subtask(
     db: Session, parent: models.Ticket, payload: schemas.SubtaskCreate, created_by_id: uuid.UUID
 ) -> models.Ticket:
     subtask = models.Ticket(
+        organization_id=parent.organization_id,
+        ticket_number=_allocate_ticket_number(db, parent.organization_id),
         title=payload.title,
         ticket_type=models.TicketType.SUBTASK,
         status=models.TicketStatus.TODO,
@@ -1377,12 +1650,12 @@ def create_subtask(
         # sprint and client context without anyone re-entering it.
         priority=parent.priority,
         assignee_id=payload.assignee_id or parent.assignee_id,
-        component_id=parent.component_id,
+        product=parent.product,
         client_name=parent.client_name,
         sprint_id=parent.sprint_id,
         parent_id=parent.id,
         created_by_id=created_by_id,
-        rank=_top_rank(db, models.TicketStatus.TODO),
+        rank=_top_rank(db, parent.organization_id, models.TicketStatus.TODO),
     )
     db.add(subtask)
     db.flush()
@@ -1397,18 +1670,20 @@ def create_subtask(
 # history — a duplicate is a NEW report of the same problem, not a clone of how
 # far the original got.
 DUPLICATE_FIELDS = (
-    "title", "description", "priority", "ticket_type", "story_points",
-    "assignee_id", "sprint_id", "epic_id", "component_id", "client_name",
-    "due_date",
+    "title", "description", "priority", "ticket_type", "task_category", "story_points",
+    "assignee_id", "sprint_id", "parent_tag_id", "product", "client_name",
+    "start_date", "due_date",
 )
 
 
 def duplicate_ticket(db: Session, ticket: models.Ticket, created_by_id: uuid.UUID) -> models.Ticket:
     copy = models.Ticket(
         **{f: getattr(ticket, f) for f in DUPLICATE_FIELDS},
+        organization_id=ticket.organization_id,
+        ticket_number=_allocate_ticket_number(db, ticket.organization_id),
         created_by_id=created_by_id,
         status=models.TicketStatus.TODO,
-        rank=_top_rank(db, models.TicketStatus.TODO),
+        rank=_top_rank(db, ticket.organization_id, models.TicketStatus.TODO),
     )
     copy.title = f"{ticket.title} (copy)"
     copy.labels = list(ticket.labels)
@@ -1422,43 +1697,24 @@ def duplicate_ticket(db: Session, ticket: models.Ticket, created_by_id: uuid.UUI
     return copy
 
 
-def convert_to_epic(db: Session, ticket: models.Ticket, actor_id: uuid.UUID) -> models.Ticket:
-    old_type = ticket.ticket_type.value
-    ticket.ticket_type = models.TicketType.EPIC
-    ticket.epic_id = None  # an epic can't belong to another epic
-
-    # An epic can't own sub-tasks, so its sub-tasks are promoted to full tickets
-    # that belong to the new epic. Otherwise they'd be orphaned by the cascade.
-    for subtask in list(ticket.subtasks):
-        subtask.parent_id = None
-        subtask.epic_id = ticket.id
-        subtask.ticket_type = models.TicketType.TASK
-
-    log_activity(db, ticket.id, actor_id, "type_changed", f"{old_type} -> epic")
-    db.commit()
-    db.refresh(ticket)
-    attach_derived(db, [ticket])
-    return ticket
-
-
 def bulk_update_tickets(
-    db: Session, bulk: schemas.TicketBulkUpdate, actor_id: uuid.UUID
+    db: Session, organization_id: uuid.UUID, bulk: schemas.TicketBulkUpdate, actor_id: uuid.UUID
 ) -> list[models.Ticket]:
     """Apply one change set to many tickets in a single transaction.
 
     Either the whole batch lands or none of it does — a half-applied bulk edit
     is worse than a failed one, because you can't tell what to retry.
     """
-    tickets = _ticket_query(db).filter(models.Ticket.id.in_(bulk.ticket_ids)).all()
+    tickets = _ticket_query(db, organization_id).filter(models.Ticket.id.in_(bulk.ticket_ids)).all()
     if not tickets:
         return []
 
-    add_labels = _resolve_labels(db, bulk.add_label_ids)
+    add_labels = _resolve_labels(db, organization_id, bulk.add_label_ids)
     remove_ids = set(bulk.remove_label_ids)
 
     # Every ticket moving to the same column would otherwise collide on one
     # rank; walk the gap so they stack in the order they were selected.
-    next_rank = _top_rank(db, bulk.status) if bulk.status else None
+    next_rank = _top_rank(db, organization_id, bulk.status) if bulk.status else None
 
     for ticket in tickets:
         # Same reason as update/move: a bulk status change must not silently
@@ -1494,23 +1750,31 @@ def bulk_update_tickets(
                 log_activity(db, ticket.id, actor_id, "assigned", "Unassigned")
                 ticket.assignee_id = None
         elif bulk.assignee_id and bulk.assignee_id != ticket.assignee_id:
-            assignee = get_user(db, bulk.assignee_id)
-            log_activity(db, ticket.id, actor_id, "assigned",
-                         f"Assigned to {assignee.full_name}" if assignee else "Assigned")
+            assignee = get_user(db, bulk.assignee_id, organization_id)
+            if not assignee:
+                raise ValueError("That assignee doesn't exist.")
+            log_activity(db, ticket.id, actor_id, "assigned", f"Assigned to {assignee.full_name}")
             ticket.assignee_id = bulk.assignee_id
 
         if bulk.clear_sprint:
             ticket.sprint_id = None
         elif bulk.sprint_id:
+            if not get_sprint(db, bulk.sprint_id, organization_id):
+                raise ValueError("That sprint doesn't exist.")
             ticket.sprint_id = bulk.sprint_id
 
-        if bulk.clear_component:
-            ticket.component_id = None
-        elif bulk.component_id and bulk.component_id != ticket.component_id:
-            component = get_component(db, bulk.component_id)
-            log_activity(db, ticket.id, actor_id, "component_changed",
-                         component.name if component else "unknown")
-            ticket.component_id = bulk.component_id
+        if bulk.clear_parent_tag:
+            ticket.parent_tag_id = None
+        elif bulk.parent_tag_id and bulk.parent_tag_id != ticket.parent_tag_id:
+            tag = get_parent_tag(db, bulk.parent_tag_id, organization_id)
+            if not tag:
+                raise ValueError("That parent tag doesn't exist.")
+            log_activity(db, ticket.id, actor_id, "parent tag_changed", tag.name)
+            ticket.parent_tag_id = bulk.parent_tag_id
+
+        if bulk.product is not None and bulk.product != ticket.product:
+            log_activity(db, ticket.id, actor_id, "product_changed", bulk.product or "none")
+            ticket.product = bulk.product
 
         if bulk.client_name is not None and bulk.client_name != ticket.client_name:
             log_activity(db, ticket.id, actor_id, "client_changed", bulk.client_name or "none")
@@ -1535,8 +1799,12 @@ def bulk_update_tickets(
     return tickets
 
 
-def bulk_delete_tickets(db: Session, ticket_ids: list[uuid.UUID]) -> int:
-    tickets = db.query(models.Ticket).filter(models.Ticket.id.in_(ticket_ids)).all()
+def bulk_delete_tickets(db: Session, organization_id: uuid.UUID, ticket_ids: list[uuid.UUID]) -> int:
+    tickets = (
+        db.query(models.Ticket)
+        .filter(models.Ticket.id.in_(ticket_ids), models.Ticket.organization_id == organization_id)
+        .all()
+    )
     for ticket in tickets:
         db.delete(ticket)
     db.commit()
@@ -1551,8 +1819,8 @@ def move_ticket(db: Session, ticket: models.Ticket, move: schemas.TicketMove, ac
     if move.status != ticket.status:
         _reject_workflow_owned_edits(ticket, {"status"})
 
-    before = get_ticket(db, move.before_id) if move.before_id else None
-    after = get_ticket(db, move.after_id) if move.after_id else None
+    before = get_ticket(db, move.before_id, ticket.organization_id) if move.before_id else None
+    after = get_ticket(db, move.after_id, ticket.organization_id) if move.after_id else None
 
     if before and after:
         new_rank = (before.rank + after.rank) / 2
@@ -1587,7 +1855,14 @@ def delete_ticket(db: Session, ticket: models.Ticket) -> None:
 def _notify(db: Session, user_id, actor_id, kind, title, ticket, body=None):
     """Stage ONE notification row. The caller commits, so the notification lands
     in the same transaction as the thing it announces (or neither does)."""
+    # Every call site has either a ticket (its org is authoritative) or, in
+    # principle, none — fall back to the recipient's own org so the column is
+    # never left unset.
+    org_id = ticket.organization_id if ticket else (
+        db.query(models.User.organization_id).filter(models.User.id == user_id).scalar()
+    )
     db.add(models.Notification(
+        organization_id=org_id,
         user_id=user_id,
         actor_id=actor_id,
         kind=kind,
@@ -1654,6 +1929,8 @@ def mark_all_read(db: Session, user_id: uuid.UUID) -> int:
 
 
 def get_notification(db: Session, notification_id: uuid.UUID) -> models.Notification | None:
+    # No organization filter needed: every caller also checks the notification's
+    # user_id against the requesting user, which already pins it to one org.
     return db.query(models.Notification).filter(models.Notification.id == notification_id).first()
 
 
@@ -1685,6 +1962,7 @@ def create_attachment(
     size_bytes: int,
 ) -> models.Attachment:
     attachment = models.Attachment(
+        organization_id=ticket.organization_id,
         ticket_id=ticket.id,
         uploaded_by_id=uploader_id,
         filename=filename,
@@ -1699,8 +1977,13 @@ def create_attachment(
     return attachment
 
 
-def get_attachment(db: Session, attachment_id: uuid.UUID) -> models.Attachment | None:
-    return db.query(models.Attachment).filter(models.Attachment.id == attachment_id).first()
+def get_attachment(
+    db: Session, attachment_id: uuid.UUID, organization_id: uuid.UUID | None = None
+) -> models.Attachment | None:
+    query = db.query(models.Attachment).filter(models.Attachment.id == attachment_id)
+    if organization_id is not None:
+        query = query.filter(models.Attachment.organization_id == organization_id)
+    return query.first()
 
 
 def get_attachment_by_stored_name(db: Session, stored_name: str) -> models.Attachment | None:
@@ -1733,9 +2016,9 @@ def get_saved_filter(db: Session, filter_id: uuid.UUID) -> models.SavedFilter | 
 
 
 def create_saved_filter(
-    db: Session, user_id: uuid.UUID, payload: schemas.SavedFilterCreate
+    db: Session, user_id: uuid.UUID, organization_id: uuid.UUID, payload: schemas.SavedFilterCreate
 ) -> models.SavedFilter:
-    saved = models.SavedFilter(user_id=user_id, **payload.model_dump())
+    saved = models.SavedFilter(user_id=user_id, organization_id=organization_id, **payload.model_dump())
     db.add(saved)
     db.commit()
     db.refresh(saved)
@@ -1759,13 +2042,15 @@ def delete_saved_filter(db: Session, saved: models.SavedFilter) -> None:
 
 # ---------- Comment CRUD ----------
 def create_comment(
-    db: Session, ticket_id: uuid.UUID, author_id: uuid.UUID, comment_in: schemas.CommentCreate
+    db: Session, ticket: models.Ticket, author_id: uuid.UUID, comment_in: schemas.CommentCreate
 ) -> models.Comment:
-    db_comment = models.Comment(ticket_id=ticket_id, author_id=author_id, body=comment_in.body)
+    ticket_id = ticket.id
+    db_comment = models.Comment(
+        organization_id=ticket.organization_id, ticket_id=ticket_id, author_id=author_id, body=comment_in.body
+    )
     db.add(db_comment)
     log_activity(db, ticket_id, author_id, "commented", comment_in.body[:80])
 
-    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
     author = get_user(db, author_id)
     author_name = author.full_name if author else "Someone"
     excerpt = comment_in.body[:120]
@@ -1774,7 +2059,10 @@ def create_comment(
     if comment_in.mention_user_ids:
         mentioned = (
             db.query(models.User)
-            .filter(models.User.id.in_(comment_in.mention_user_ids))
+            .filter(
+                models.User.id.in_(comment_in.mention_user_ids),
+                models.User.organization_id == ticket.organization_id,
+            )
             .all()
         )
         for user in mentioned:

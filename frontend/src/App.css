@@ -270,6 +270,32 @@ body { background: var(--color-bg); color: var(--color-text); }
   background: rgba(62, 123, 250, 0.08);
 }
 
+/* Task category picker in the ticket panel — same chip language as
+   toggle-chip, wrapped so six labels never overflow the panel width. */
+.segmented-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.segmented-option {
+  padding: 7px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  font-size: 12px;
+  color: var(--color-text-dim);
+  background: transparent;
+  cursor: pointer;
+}
+.segmented-option.active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: rgba(62, 123, 250, 0.08);
+}
+
+.bug-report-fields .field-row {
+  margin-top: 14px;
+}
+
 .board-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(240px, 1fr));
@@ -908,6 +934,115 @@ body { background: var(--color-bg); color: var(--color-text); }
   padding: 24px 28px 40px;
 }
 
+.parent-tags-page {
+  padding: 24px 28px 40px;
+}
+
+/* Issues page. board-toolbar supplies its own 28px side padding (it's reused
+   as-is from the Board page, which has none of its own), so page-head and the
+   table wrapper match that padding themselves rather than doubling up. */
+.issues-page .page-head {
+  padding: 24px 28px 0;
+  margin-bottom: 4px;
+}
+
+.issues-table-wrap {
+  padding: 0 28px 40px;
+  overflow-x: auto;
+}
+
+.issues-table {
+  min-width: 900px;
+}
+
+.issues-check-col {
+  width: 32px;
+}
+
+.issues-grow-col {
+  width: 100%;
+}
+
+.issues-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.issues-sort-btn.active {
+  color: var(--color-accent);
+}
+.issues-sort-arrow {
+  font-size: 8px;
+}
+
+.issues-row.selected {
+  background: rgba(62, 123, 250, 0.07);
+}
+
+.issues-clickable {
+  cursor: pointer;
+}
+
+.issues-title {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.issues-priority {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.empty-cell {
+  color: var(--color-text-faint);
+}
+
+.sibling-preview {
+  margin-top: 8px;
+}
+.sibling-preview .backlog-list {
+  margin-top: 4px;
+}
+
+.linked-tickets-heading {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-dim);
+  margin: 14px 0 8px;
+}
+
+.page-blurb {
+  color: var(--color-text-dim);
+  font-size: 13px;
+  max-width: 640px;
+  margin: -8px 0 20px;
+}
+
+/* Rows here open a ticket on click, they're never dragged — backlog-row's
+   own cursor: grab (meant for the actual drag-and-drop backlog) would be
+   misleading here. */
+.parent-tags-page .backlog-row {
+  cursor: pointer;
+}
+
+/* Same click-to-open row style, used for a ticket panel's Linked Tickets list. */
+.linked-ticket-row {
+  cursor: pointer;
+  gap: 10px;
+}
+
 .page-head {
   display: flex;
   align-items: center;
@@ -1155,6 +1290,21 @@ body { background: var(--color-bg); color: var(--color-text); }
   color: var(--color-accent);
   background: rgba(62, 123, 250, 0.1);
 }
+/* Ticket-status flavor of the same pill, used on the Linked Tickets list in
+   the ticket panel so a hub's connections read as "what state is this in"
+   at a glance, not just a name. */
+.state-pill.state-done {
+  border-color: var(--priority-low);
+  color: var(--priority-low);
+  background: rgba(95, 184, 138, 0.1);
+}
+.state-pill.state-in_progress,
+.state-pill.state-code_review {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: rgba(62, 123, 250, 0.1);
+}
+
 .state-pill.state-completed {
   border-color: var(--priority-low);
   color: var(--priority-low);
@@ -1829,6 +1979,22 @@ body { background: var(--color-bg); color: var(--color-text); }
   padding: 2px 7px;
   border-radius: 3px;
   border: 1px solid;
+  background: transparent;
+  white-space: nowrap;
+}
+
+/* Product is a fixed string now, not a colour-coded record, so it gets one
+   static colour rather than the per-record borderColor/color the old
+   component-chip relied on. */
+.product-chip {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
   background: transparent;
   white-space: nowrap;
 }
