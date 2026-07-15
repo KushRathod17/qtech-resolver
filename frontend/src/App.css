@@ -992,6 +992,52 @@ body { background: var(--color-bg); color: var(--color-text); }
   cursor: pointer;
 }
 
+/* --- Reports: chart-table rows are clickable too (open a ticket, or filter
+   to an employee), and need their own hover/selected treatment since they
+   aren't inside the Issues page's own row markup. --- */
+.chart-table tr.issues-clickable:hover td {
+  background: var(--color-panel-alt);
+}
+.chart-table tr.issues-clickable.selected td {
+  background: rgba(62, 123, 250, 0.1);
+}
+
+.quick-search-wrap {
+  position: relative;
+  margin-bottom: 18px;
+}
+.quick-search-wrap .search-input {
+  width: 100%;
+}
+.quick-search-results {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.quick-search-results li + li {
+  border-top: 1px solid var(--color-border);
+}
+.quick-search-results button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--color-text);
+}
+.quick-search-results button:hover {
+  background: var(--color-panel-alt);
+}
+
 .issues-title {
   color: var(--color-text);
   font-weight: 500;

@@ -8,6 +8,7 @@ import {
   parentTagsApi,
   errorMessage,
 } from "../api/resources";
+import { downloadFile } from "../api/files";
 import { useAuth } from "../context/AuthContext";
 import LabelPicker from "./LabelPicker";
 import SlaBadge from "./SlaBadge";
@@ -128,6 +129,7 @@ export default function TicketModal({
   const [activity, setActivity] = useState([]);
   const [handoffs, setHandoffs] = useState([]);
   const [pendingAction, setPendingAction] = useState(null); // which handoff modal is open
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   // --- Routing a NEW ticket into the workflow ---
   // Defaults to the first Testing team, which is the normal path for a customer
@@ -390,6 +392,18 @@ export default function TicketModal({
     } catch (err) {
       setError(errorMessage(err, "Couldn't duplicate that ticket."));
       setSaving(false);
+    }
+  }
+
+  async function handleExportPdf() {
+    setExportingPdf(true);
+    setError("");
+    try {
+      await downloadFile(`/tickets/${ticket.id}/export`, `${ticket.key}.pdf`);
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't generate the PDF."));
+    } finally {
+      setExportingPdf(false);
     }
   }
 
@@ -998,6 +1012,11 @@ export default function TicketModal({
           {!isNew && (
             <button type="button" className="btn-ghost" onClick={handleDuplicate} disabled={saving}>
               Duplicate
+            </button>
+          )}
+          {!isNew && (
+            <button type="button" className="btn-ghost" onClick={handleExportPdf} disabled={exportingPdf}>
+              {exportingPdf ? "Preparing PDF…" : "⬇ Export PDF"}
             </button>
           )}
           <div className="spacer" />

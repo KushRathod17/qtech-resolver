@@ -1472,11 +1472,14 @@ def get_tickets(
         query = query.filter(models.Ticket.created_at < date_to + timedelta(days=1))
     if search:
         term = f"%{search}%"
-        # Title, description, and the ticket key — support engineers paste keys.
+        # Title, description, client, and the assignee's name — so typing a
+        # person's name in the same search box the Reports page uses finds
+        # what they're on, without a separate "search by employee" input.
         conditions = [
             models.Ticket.title.ilike(term),
             models.Ticket.description.ilike(term),
             models.Ticket.client_name.ilike(term),
+            models.Ticket.assignee.has(models.User.full_name.ilike(term)),
         ]
         digits = "".join(ch for ch in search if ch.isdigit())
         if digits:

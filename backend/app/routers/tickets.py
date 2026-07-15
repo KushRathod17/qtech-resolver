@@ -3,7 +3,7 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Query, Response
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db, get_current_user, require_role
@@ -15,6 +15,7 @@ from ..schemas import (
 )
 from .. import crud, workflow
 from ..storage import storage
+from ..pdf_ticket import build_ticket_pdf
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -140,6 +141,32 @@ def get_ticket(
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return crud.attach_workflow(db, [ticket], current_user)[0]
+
+
+@router.get("/{ticket_id}/export")
+def export_ticket_pdf(
+    ticket_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """One ticket, as a document: dates, people, description, every comment,
+    every status/assignment change, and (if it ever moved through the
+    cross-team workflow) who held it and for how long."""
+    ticket = crud.get_ticket(db, ticket_id, current_user.organization_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    pdf_bytes = build_ticket_pdf(
+        ticket=ticket,
+        comments=crud.get_comments_for_ticket(db, ticket_id),
+        activity=crud.get_activity_log(db, ticket_id),
+        handoffs=crud.build_timeline(crud.get_handoffs(db, ticket_id)),
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{ticket.key}.pdf"'},
+    )
 
 
 @router.patch("/{ticket_id}", response_model=TicketOut)

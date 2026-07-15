@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
   sprintsApi,
@@ -201,8 +202,10 @@ function LabelBarChart({ rows }) {
 }
 
 export default function Reports() {
+  const navigate = useNavigate();
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [staleDays, setStaleDays] = useState(7);
+  const [quickSearch, setQuickSearch] = useState("");
 
   const [users, setUsers] = useState([]);
   const [labels, setLabels] = useState([]);
@@ -285,6 +288,25 @@ export default function Reports() {
   const ongoing = useMemo(() => allTickets.filter((t) => t.status !== "done"), [allTickets]);
   const done = useMemo(() => allTickets.filter((t) => t.status === "done"), [allTickets]);
 
+  // Quick-find by ticket key/title or employee name, within whatever the
+  // filter bar currently matches — clear the filters first for a fully
+  // unscoped search.
+  const quickResults = useMemo(() => {
+    const q = quickSearch.trim().toLowerCase();
+    if (!q) return [];
+    return allTickets
+      .filter((t) =>
+        t.key.toLowerCase().includes(q) ||
+        t.title.toLowerCase().includes(q) ||
+        (t.assignee?.full_name || "").toLowerCase().includes(q)
+      )
+      .slice(0, 8);
+  }, [quickSearch, allTickets]);
+
+  function openTicket(id) {
+    navigate(`/board?ticket=${id}`);
+  }
+
   const completionPct = overview && overview.total_points > 0
     ? Math.round((overview.completed_points / overview.total_points) * 100)
     : 0;
@@ -320,6 +342,34 @@ export default function Reports() {
         onExport={handleExport}
         exporting={exporting}
       />
+
+      <div className="quick-search-wrap">
+        <input
+          type="search"
+          className="search-input"
+          placeholder="Find a ticket by key, title, or employee name…"
+          value={quickSearch}
+          onChange={(e) => setQuickSearch(e.target.value)}
+          aria-label="Quick search"
+        />
+        {quickResults.length > 0 && (
+          <ul className="quick-search-results">
+            {quickResults.map((t) => (
+              <li key={t.id}>
+                <button type="button" onClick={() => openTicket(t.id)}>
+                  <span className="ticket-id">{t.key}</span>
+                  <span className="issues-grow-col">{t.title}</span>
+                  <StatusPill status={t.status} />
+                  <AssigneeCell user={t.assignee} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {quickSearch.trim() && quickResults.length === 0 && (
+          <p className="empty-state" style={{ marginTop: 6 }}>No match within the current filters.</p>
+        )}
+      </div>
 
       {error && (
         <div className="banner-error" role="alert">
@@ -370,7 +420,7 @@ export default function Reports() {
                   </thead>
                   <tbody>
                     {ongoing.map((t) => (
-                      <tr key={t.id}>
+                      <tr key={t.id} className="issues-clickable" onClick={() => openTicket(t.id)}>
                         <td><span className="ticket-id">{t.key}</span></td>
                         <td className="issues-grow-col">{t.title}</td>
                         <td><StatusPill status={t.status} /></td>
@@ -410,7 +460,7 @@ export default function Reports() {
                   </thead>
                   <tbody>
                     {staleTickets.map((row) => (
-                      <tr key={row.ticket.id}>
+                      <tr key={row.ticket.id} className="issues-clickable" onClick={() => openTicket(row.ticket.id)}>
                         <td><span className="ticket-id">{row.ticket.key}</span></td>
                         <td className="issues-grow-col">{row.ticket.title}</td>
                         <td><StatusPill status={row.ticket.status} /></td>
@@ -447,7 +497,7 @@ export default function Reports() {
                   </thead>
                   <tbody>
                     {done.map((t) => (
-                      <tr key={t.id}>
+                      <tr key={t.id} className="issues-clickable" onClick={() => openTicket(t.id)}>
                         <td><span className="ticket-id">{t.key}</span></td>
                         <td className="issues-grow-col">{t.title}</td>
                         <td><AssigneeCell user={t.assignee} /></td>
@@ -465,7 +515,9 @@ export default function Reports() {
           <section className="chart-card">
             <div className="chart-card-head">
               <h3>By employee</h3>
-              <p className="chart-sub">What each person is carrying, and how much of it is finished.</p>
+              <p className="chart-sub">
+                What each person is carrying, and how much of it is finished. Click a row to filter the whole page to them.
+              </p>
             </div>
             {byEmployee.length === 0 ? (
               <p className="empty-state">No one on the team yet.</p>
@@ -487,8 +539,14 @@ export default function Reports() {
                       const pct = row.assigned_count > 0
                         ? Math.round((row.done_count / row.assigned_count) * 100)
                         : 0;
+                      const selected = filters.assignee_id === row.user.id;
                       return (
-                        <tr key={row.user.id}>
+                        <tr
+                          key={row.user.id}
+                          className={`issues-clickable ${selected ? "selected" : ""}`}
+                          onClick={() => setFilters((f) => ({ ...f, assignee_id: selected ? "" : row.user.id }))}
+                          title={selected ? "Click to clear this filter" : `Filter the whole page to ${row.user.full_name}`}
+                        >
                           <td><AssigneeCell user={row.user} /></td>
                           <td>{row.assigned_count}</td>
                           <td>{row.in_progress_count}</td>
