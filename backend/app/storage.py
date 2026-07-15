@@ -5,10 +5,11 @@ Local disk is fine for local development and for the test suite, but it's the
 wrong choice for a free-tier host: the filesystem there is ephemeral, so
 anything written to it vanishes on the next deploy or restart (Render's free
 web services don't support a persistent disk at all). Set the S3_* settings
-below to point at any S3-compatible bucket (Cloudflare R2 is the default this
-app is documented against, since its free tier has no expiry and zero egress
-fees) and uploads go there instead; leave them unset and everything falls
-back to local disk under uploads/, exactly like before Slice/Phase 4.
+below to point at any S3-compatible bucket -- Backblaze B2 is what
+DEPLOYING.md walks through, since its free tier needs no credit card at all
+(Cloudflare R2, AWS S3, and others all work too, if you have a preference) --
+and uploads go there instead; leave them unset and everything falls back to
+local disk under uploads/, exactly like before Slice/Phase 4.
 
 The choice is made once, at import time, from config -- not per-request -- so
 a single deploy is consistently on one backend or the other.

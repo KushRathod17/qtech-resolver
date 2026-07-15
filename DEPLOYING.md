@@ -1,12 +1,17 @@
 # Deploying QTech Resolver (free tier)
 
-This walks through a real, working deployment at **$0/month**, using:
+This walks through a real, working deployment at **$0/month, no credit card
+anywhere**, using:
 
-- **Render** — hosts the backend (FastAPI) and frontend (static React build)
+- **Render** — hosts the backend (FastAPI) and frontend (static React build).
+  Free, no card.
 - **Neon** — Postgres, free forever (unlike Render's own free Postgres, which
-  auto-deletes after 30 days)
-- **Cloudflare R2** — object storage for ticket attachments and avatars, since
-  a free Render web service has no persistent disk
+  auto-deletes after 30 days). Free, no card.
+- **Backblaze B2** — object storage for ticket attachments and avatars, since
+  a free Render web service has no persistent disk. Free for private buckets,
+  no card (Backblaze only asks for a card on *public* buckets, which this app
+  never uses — every file is served through the authenticated backend, never
+  directly from the bucket).
 
 Everything below is a dashboard/account step you do yourself — none of it
 involves handing over credentials to anyone. Total time: 20-30 minutes.
@@ -34,22 +39,26 @@ it there now (a private repo is fine — Render supports those).
    `postgresql://user:password@ep-something.region.aws.neon.tech/dbname?sslmode=require`
 4. Keep this tab open — you'll paste this string into Render in step 5.
 
-## 3. Create the file bucket (Cloudflare R2)
+## 3. Create the file bucket (Backblaze B2)
 
-1. Go to the [Cloudflare dashboard](https://dash.cloudflare.com) → **R2** (sign
-   up free if you don't have an account — no card required for the free tier).
-2. Create a bucket — name it `qtech-resolver-uploads`.
-3. Go to **R2 → Manage API tokens** and create a token with **read and write**
-   permission scoped to that bucket. Cloudflare shows you, once, four values —
-   copy all of them somewhere safe:
-   - **Access Key ID**
-   - **Secret Access Key**
-   - **Account ID** (used to build the endpoint URL below)
-   - Your endpoint URL is: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
+1. Go to [backblaze.com/sign-up/cloud-storage](https://www.backblaze.com/sign-up/cloud-storage)
+   and sign up — no card required.
+2. In the dashboard, **Create a Bucket** — name it `qtech-resolver-uploads`,
+   and set it to **Private** (this is also what keeps it free — public
+   buckets are the one thing Backblaze asks a card for, and this app never
+   needs the bucket to be public).
+3. Once created, open the bucket's details page and note its **Endpoint** —
+   it looks like `s3.us-west-004.backblazeb2.com` (the region-like code in the
+   middle, e.g. `us-west-004`, is your `S3_REGION`).
+4. Go to **Account → App Keys → Add a New Application Key**. Scope it to just
+   this bucket, with **Read and Write** access. Backblaze shows you two values
+   **once** — copy them somewhere safe:
+   - **keyID** → this is your `S3_ACCESS_KEY_ID`
+   - **applicationKey** → this is your `S3_SECRET_ACCESS_KEY`
 
-You do **not** need to make the bucket public or configure CORS on it — the
-backend proxies every file through itself (with the same auth + organization
-check it always had), so the browser never talks to R2 directly.
+You do **not** need to configure CORS on the bucket — the backend proxies
+every file through itself (with the same auth + organization check it always
+had), so the browser never talks to Backblaze directly.
 
 ## 4. Deploy to Render
 
@@ -61,10 +70,12 @@ check it always had), so the browser never talks to R2 directly.
 3. Render prompts you for the secret values marked `sync: false` in
    `render.yaml`. Fill in:
    - `DATABASE_URL` → the Neon connection string from step 2
-   - `S3_ENDPOINT_URL` → `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` from step 3
-   - `S3_ACCESS_KEY_ID` → from step 3
-   - `S3_SECRET_ACCESS_KEY` → from step 3
+   - `S3_ENDPOINT_URL` → `https://s3.<region>.backblazeb2.com` from step 3
+     (the full endpoint you noted, with `https://` in front)
+   - `S3_ACCESS_KEY_ID` → the keyID from step 3
+   - `S3_SECRET_ACCESS_KEY` → the applicationKey from step 3
    - `S3_BUCKET_NAME` → `qtech-resolver-uploads`
+   - `S3_REGION` → the region code from the endpoint (e.g. `us-west-004`)
 4. Click **Apply**. Render builds both services. The backend's
    `preDeployCommand` runs `alembic upgrade head` automatically before each
    deploy, so the database schema is created on this first deploy too — you
@@ -104,7 +115,7 @@ generate fake demo tickets — don't run them against production.)
 
 - Log in and confirm the board loads.
 - Upload an attachment to a ticket and reopen it — this round-trips through
-  R2, so it confirms the storage setup end-to-end.
+  Backblaze, so it confirms the storage setup end-to-end.
 - Upload an avatar — same check, different bucket path.
 - Check `https://<your-backend>.onrender.com/health` returns `{"status":"ok"}`.
 

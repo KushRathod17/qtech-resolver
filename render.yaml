@@ -1,17 +1,18 @@
 # Render Blueprint for QTech Resolver.
 #
-# This deploys on Render's FREE tier: both services below run on `plan: free`,
-# and there is deliberately no `databases:` section -- Render's free Postgres
-# expires 30 days after creation, which isn't viable for real data. Instead,
-# DATABASE_URL points at an external always-free Postgres (Neon is what the
-# deploy runbook walks through). See DEPLOYING.md for the full step-by-step.
+# This deploys on Render's FREE tier, with no credit card anywhere: both
+# services below run on `plan: free`, and there is deliberately no
+# `databases:` section -- Render's free Postgres expires 30 days after
+# creation, which isn't viable for real data. Instead, DATABASE_URL points at
+# an external always-free Postgres (Neon). Attachments/avatars go to a
+# private, card-free Backblaze B2 bucket (any S3-compatible provider works --
+# see app/storage.py). See DEPLOYING.md for the full step-by-step.
 #
 # Known trade-offs of the free tier, so they don't come as a surprise later:
 #   - The backend spins down after 15 minutes with no traffic, and the first
 #     request after that takes ~30-60s to wake it back up (cold start).
-#   - Attachments/avatars go to an S3-compatible bucket (Cloudflare R2's free
-#     tier), not a Render disk -- free web services can't attach one, and even
-#     paid ones only support a single, non-scaled instance.
+#   - A Render disk isn't an option here even on a paid plan without also
+#     giving up horizontal scaling -- object storage avoids that trade entirely.
 #   - Everything here can be upgraded later (paid plan, Render's own managed
 #     Postgres, a persistent disk) without changing any application code --
 #     only env vars and this file change.
@@ -26,10 +27,12 @@ services:
     buildFilter:
       paths:
         - backend/**
-    buildCommand: pip install -r requirements.txt
-    # Migrations run before every deploy, not bundled into the build step --
-    # if they fail, the deploy is aborted before the old code is replaced.
-    preDeployCommand: alembic upgrade head
+    # preDeployCommand (the normally-preferred place for migrations) requires
+    # a paid plan, so on free tier the migration runs as the last build step
+    # instead -- functionally the same effect (schema is current before the
+    # new code starts serving), just less isolated: a failed migration here
+    # fails the build outright rather than cleanly aborting a separate stage.
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
@@ -49,6 +52,10 @@ services:
         sync: false
       - key: S3_BUCKET_NAME
         sync: false
+      # Backblaze's region code, e.g. "us-west-004" -- taken from the middle
+      # of the bucket's endpoint (s3.<region>.backblazeb2.com).
+      - key: S3_REGION
+        sync: false
 
       # Generated once by Render, not something you need to supply.
       - key: JWT_SECRET_KEY
@@ -58,8 +65,6 @@ services:
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES
         value: "60"
-      - key: S3_REGION
-        value: auto
 
       # Update this if you rename the frontend service or add a custom
       # domain -- it must match exactly where the frontend is actually
