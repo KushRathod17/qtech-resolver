@@ -10,28 +10,26 @@ const W = 720;
 const H = 240;
 const PAD = { top: 16, right: 20, bottom: 46, left: 56 };
 
-/** Average hold per team. One series, so no legend — the title names it. */
+/** Average hold per team. One series, so no legend — the title names it.
+    Every team gets a bar, even ones no ticket has reached yet: a missing bar
+    reads as "unknown data," a bar sitting at zero reads as what's actually
+    true -- that team simply hasn't held anything yet. */
 function HoldingTimesChart({ rows }) {
-  const withData = rows.filter((r) => r.average_hold_seconds != null);
-  if (withData.length === 0) {
-    return (
-      <p className="empty-state">
-        No completed handoffs yet — a team's average only counts holds that have actually ended.
-      </p>
-    );
+  if (rows.length === 0) {
+    return <p className="empty-state">No teams to chart yet.</p>;
   }
 
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
 
   // Plot in hours: seconds makes the axis unreadable.
-  const hours = withData.map((r) => r.average_hold_seconds / 3600);
+  const hours = rows.map((r) => (r.average_hold_seconds != null ? r.average_hold_seconds / 3600 : 0));
   const maxY = Math.max(...hours, 0.1);
   const ticks = niceTicks(maxY);
   const top = ticks[ticks.length - 1];
 
   const y = (v) => PAD.top + plotH - (v / top) * plotH;
-  const bandW = plotW / withData.length;
+  const bandW = plotW / rows.length;
   const barW = Math.min(56, bandW - 30);
 
   return (
@@ -46,26 +44,29 @@ function HoldingTimesChart({ rows }) {
         </g>
       ))}
 
-      {withData.map((r, i) => {
+      {rows.map((r, i) => {
         const cx = PAD.left + i * bandW + bandW / 2;
-        const value = r.average_hold_seconds / 3600;
+        const reached = r.average_hold_seconds != null;
+        const value = reached ? r.average_hold_seconds / 3600 : 0;
         return (
           <g key={r.team.id}>
             <path
               d={barPath(cx - barW / 2, y(value), barW, PAD.top + plotH - y(value))}
-              fill={SERIES.primary}
+              fill={reached ? SERIES.primary : INK.grid}
             />
             {/* Direct-label the bars: there are only a handful, and the whole
                 question is "which number is biggest". */}
             <text x={cx} y={y(value) - 7} textAnchor="middle" className="chart-endpoint-label"
-                  fill={SERIES.primary}>
-              {formatDuration(r.average_hold_seconds)}
+                  fill={reached ? SERIES.primary : INK.axis}>
+              {reached ? formatDuration(r.average_hold_seconds) : "0"}
             </text>
             <text x={cx} y={H - 26} textAnchor="middle" className="chart-tick">
               {r.team.name}
             </text>
             <text x={cx} y={H - 12} textAnchor="middle" className="chart-tick chart-tick-faint">
-              {r.completed_holds} hold{r.completed_holds === 1 ? "" : "s"}
+              {reached
+                ? `${r.completed_holds} hold${r.completed_holds === 1 ? "" : "s"}`
+                : "not reached yet"}
             </text>
           </g>
         );
@@ -148,6 +149,20 @@ export default function Workflow() {
     return COLUMNS.find((c) => c.key === status)?.label || status;
   }
 
+  // Who, by name, is actually holding each team's tickets right now -- a bare
+  // count on the stat tile told you "1" but not whose desk it's actually on.
+  const holdersByTeam = useMemo(() => {
+    const map = {};
+    for (const r of rows) {
+      if (!r.current_team || r.status === "done") continue;
+      const id = r.current_team.id;
+      const name = r.current_assignee?.full_name || "Unassigned";
+      if (!map[id]) map[id] = [];
+      if (!map[id].includes(name)) map[id].push(name);
+    }
+    return map;
+  }, [rows]);
+
   // Typing a key/name and hitting Enter with exactly one match left jumps
   // straight to that ticket's chain of custody -- no need to also click it.
   function handleSearchKeyDown(e) {
@@ -164,6 +179,17 @@ export default function Workflow() {
     <div className="workflow-page">
       <div className="page-head">
         <h2>Workflow</h2>
+        {rows.length > 0 && (
+          <input
+            type="search"
+            className="search-input workflow-main-search"
+            placeholder="Find a ticket by key, title, or assignee…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            aria-label="Find a ticket"
+          />
+        )}
       </div>
 
       {error && <div className="banner-error" role="alert">{error}</div>}
@@ -189,6 +215,9 @@ export default function Workflow() {
                     ? formatDuration(h.average_hold_seconds)
                     : "—"}
                 </p>
+                {holdersByTeam[h.team.id]?.length > 0 && (
+                  <p className="stat-hint">({holdersByTeam[h.team.id].join(", ")})</p>
+                )}
               </div>
             ))}
           </div>
@@ -216,21 +245,10 @@ export default function Workflow() {
             <div className="chart-card-head">
               <h3>Every ticket in the workflow</h3>
               <p className="chart-sub">
-                Status shows where each one stands at a glance. Search to jump straight to one, or click any row
-                for its full chain of custody.
+                Status shows where each one stands at a glance. Use the search box at the top of the page to
+                jump straight to one, or click any row for its full chain of custody.
               </p>
             </div>
-
-            <input
-              type="search"
-              className="search-input"
-              placeholder="Find a ticket by key, title, or assignee…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              aria-label="Filter the workflow table"
-              style={{ marginBottom: 12 }}
-            />
 
             {filteredRows.length === 0 ? (
               <p className="empty-state">No ticket in the workflow matches "{search}".</p>
