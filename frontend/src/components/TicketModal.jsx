@@ -455,24 +455,34 @@ export default function TicketModal({
         </header>
 
         <div className="panel-body">
-          {/* --- Cross-team workflow: who has it, and what may I do --- */}
-          {!isNew && ticket.current_team && (
+          {/* --- Cross-team workflow: who has it, and what may I do ---
+              Shown once this ticket has EITHER already entered the workflow
+              (current_team set) OR is eligible to be raised into it (nobody
+              holds it yet, but "Raise" is on offer) — a plain ticket created
+              without routing isn't stuck outside the workflow forever. */}
+          {!isNew && (ticket.current_team || ticket.available_actions.length > 0) && (
             <div className="workflow-strip">
-              <div className="workflow-holder">
-                <span className="workflow-label">Currently with</span>
-                <span
-                  className="component-chip"
-                  style={{ borderColor: ticket.current_team.color, color: ticket.current_team.color }}
-                >
-                  {ticket.current_team.name}
-                </span>
-                {ticket.assignee && (
-                  <span className="timeline-person">
-                    <Avatar user={ticket.assignee} size={22} />
-                    {ticket.assignee.full_name}
+              {ticket.current_team ? (
+                <div className="workflow-holder">
+                  <span className="workflow-label">Currently with</span>
+                  <span
+                    className="component-chip"
+                    style={{ borderColor: ticket.current_team.color, color: ticket.current_team.color }}
+                  >
+                    {ticket.current_team.name}
                   </span>
-                )}
-              </div>
+                  {ticket.assignee && (
+                    <span className="timeline-person">
+                      <Avatar user={ticket.assignee} size={22} />
+                      {ticket.assignee.full_name}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="workflow-holder">
+                  <span className="workflow-label">Not yet in the workflow</span>
+                </div>
+              )}
 
               {ticket.available_actions.length > 0 ? (
                 <div className="workflow-actions">
@@ -533,7 +543,15 @@ export default function TicketModal({
             </div>
             <div className="field">
               <label htmlFor="t-status">Status</label>
-              {workflowOwned ? (
+              {isNew ? (
+                // Every ticket starts life as To Do -- picking Done or In
+                // Progress before any work happened made the board lie from
+                // minute one. Move it from the board (or edit it) afterward
+                // if it needs a different column.
+                <p className="locked-field" title="New tickets always start in To Do">
+                  To Do
+                </p>
+              ) : workflowOwned ? (
                 <p className="locked-field" title="Set by the cross-team workflow">
                   {COLUMNS.find((c) => c.key === ticket.status)?.label || ticket.status}
                   <span className="locked-hint">workflow</span>

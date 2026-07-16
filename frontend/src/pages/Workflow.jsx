@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 
 import { workflowApi, ticketsApi, errorMessage } from "../api/resources";
-import { Avatar } from "../board/constants";
+import { Avatar, COLUMNS } from "../board/constants";
 import { formatDuration } from "../board/duration";
 import HandoffTimeline from "../components/HandoffTimeline";
 import { SERIES, INK, niceTicks, barPath } from "../components/charts/chartUtils";
@@ -82,6 +82,7 @@ export default function Workflow() {
   const [holding, setHolding] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
 
   const [openTicket, setOpenTicket] = useState(null); // drill-in
   const [handoffs, setHandoffs] = useState([]);
@@ -130,6 +131,30 @@ export default function Workflow() {
     if (!scored.length) return null;
     return scored.reduce((a, b) => (b.average_hold_seconds > a.average_hold_seconds ? b : a));
   }, [holding]);
+
+  // Narrows the table to one ticket (or a few) without touching the aggregate
+  // stats/charts above it, which stay org-wide regardless of what's typed here.
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) =>
+      r.key.toLowerCase().includes(q) ||
+      r.title.toLowerCase().includes(q) ||
+      (r.current_assignee?.full_name || "").toLowerCase().includes(q)
+    );
+  }, [search, rows]);
+
+  function statusLabel(status) {
+    return COLUMNS.find((c) => c.key === status)?.label || status;
+  }
+
+  // Typing a key/name and hitting Enter with exactly one match left jumps
+  // straight to that ticket's chain of custody -- no need to also click it.
+  function handleSearchKeyDown(e) {
+    if (e.key === "Enter" && filteredRows.length === 1) {
+      drillInto(filteredRows[0]);
+    }
+  }
 
   if (loading) {
     return <div className="workflow-page"><p className="empty-state">Loading workflow…</p></div>;
@@ -190,60 +215,82 @@ export default function Workflow() {
           <section className="chart-card">
             <div className="chart-card-head">
               <h3>Every ticket in the workflow</h3>
-              <p className="chart-sub">Click a row for its full chain of custody.</p>
+              <p className="chart-sub">
+                Status shows where each one stands at a glance. Search to jump straight to one, or click any row
+                for its full chain of custody.
+              </p>
             </div>
 
-            <div className="timeline-scroll">
-              <table className="chart-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Ticket</th>
-                    <th scope="col">Currently with</th>
-                    <th scope="col">Assignee</th>
-                    <th scope="col">Teams touched</th>
-                    <th scope="col">Handoffs</th>
-                    <th scope="col">Open for</th>
-                    <th scope="col">Since last handoff</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr
-                      key={r.ticket_id}
-                      className="workflow-row"
-                      onClick={() => drillInto(r)}
-                      tabIndex={0}
-                      onKeyDown={(e) => e.key === "Enter" && drillInto(r)}
-                    >
-                      <td>
-                        <span className="ticket-id">{r.key}</span>{" "}
-                        <span className="profile-ticket-title">{r.title}</span>
-                      </td>
-                      <td>
-                        {r.current_team ? (
-                          <span
-                            className="component-chip"
-                            style={{ borderColor: r.current_team.color, color: r.current_team.color }}
-                          >
-                            {r.current_team.name}
-                          </span>
-                        ) : "—"}
-                      </td>
-                      <td>
-                        <span className="timeline-person">
-                          <Avatar user={r.current_assignee} size={20} />
-                          {r.current_assignee?.full_name || "—"}
-                        </span>
-                      </td>
-                      <td>{r.teams_touched}</td>
-                      <td>{r.handoff_count}</td>
-                      <td>{formatDuration(r.total_open_seconds)}</td>
-                      <td>{formatDuration(r.seconds_since_last_handoff)}</td>
+            <input
+              type="search"
+              className="search-input"
+              placeholder="Find a ticket by key, title, or assignee…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              aria-label="Filter the workflow table"
+              style={{ marginBottom: 12 }}
+            />
+
+            {filteredRows.length === 0 ? (
+              <p className="empty-state">No ticket in the workflow matches "{search}".</p>
+            ) : (
+              <div className="timeline-scroll">
+                <table className="chart-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Ticket</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Currently with</th>
+                      <th scope="col">Assignee</th>
+                      <th scope="col">Teams touched</th>
+                      <th scope="col">Handoffs</th>
+                      <th scope="col">Open for</th>
+                      <th scope="col">Since last handoff</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filteredRows.map((r) => (
+                      <tr
+                        key={r.ticket_id}
+                        className="workflow-row"
+                        onClick={() => drillInto(r)}
+                        tabIndex={0}
+                        onKeyDown={(e) => e.key === "Enter" && drillInto(r)}
+                      >
+                        <td>
+                          <span className="ticket-id">{r.key}</span>{" "}
+                          <span className="profile-ticket-title">{r.title}</span>
+                        </td>
+                        <td>
+                          <span className={`state-pill state-${r.status}`}>{statusLabel(r.status)}</span>
+                        </td>
+                        <td>
+                          {r.current_team ? (
+                            <span
+                              className="component-chip"
+                              style={{ borderColor: r.current_team.color, color: r.current_team.color }}
+                            >
+                              {r.current_team.name}
+                            </span>
+                          ) : "—"}
+                        </td>
+                        <td>
+                          <span className="timeline-person">
+                            <Avatar user={r.current_assignee} size={20} />
+                            {r.current_assignee?.full_name || "—"}
+                          </span>
+                        </td>
+                        <td>{r.teams_touched}</td>
+                        <td>{r.handoff_count}</td>
+                        <td>{formatDuration(r.total_open_seconds)}</td>
+                        <td>{formatDuration(r.seconds_since_last_handoff)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         </>
       )}
