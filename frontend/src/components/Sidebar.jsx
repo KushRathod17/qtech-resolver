@@ -10,7 +10,9 @@ const NAV = [
   { to: "/workflow", label: "Workflow", icon: "⇄" },
   { to: "/people", label: "People", icon: "☺" },
   { to: "/reports", label: "Reports", icon: "◔" },
-  { to: "/sprints", label: "Sprints", icon: "⚑" },
+  // Sprints deliberately left out of the nav -- not part of how this team
+  // works. The page, route, and data are untouched; it's just not signposted
+  // day to day. Reachable directly at /sprints if it's ever needed again.
   { to: "/parent-tags", label: "Parent Tags", icon: "◈" },
   { to: "/issues", label: "Issues", icon: "⊙" },
   { to: "/settings", label: "Settings", icon: "⚙" },

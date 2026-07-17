@@ -71,7 +71,8 @@ const NAV = [
   { id: "nav-people", label: "Go to People", to: "/people", hint: "Navigation" },
   { id: "nav-my-tickets", label: "Go to My Tickets", to: "/my-tickets", hint: "Navigation" },
   { id: "nav-reports", label: "Go to Reports", to: "/reports", hint: "Navigation" },
-  { id: "nav-sprints", label: "Go to Sprints", to: "/sprints", hint: "Navigation" },
+  // Sprints is deliberately left out of both the sidebar and here -- not part
+  // of how this team works. Still reachable directly at /sprints.
   // Components was removed in favor of a plain Product field on the ticket.
   { id: "nav-parent-tags", label: "Go to Parent Tags", to: "/parent-tags", hint: "Navigation" },
   { id: "nav-issues", label: "Go to Issues", to: "/issues", hint: "Navigation" },
