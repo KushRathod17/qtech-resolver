@@ -57,15 +57,6 @@ def test_a_subtask_cannot_have_subtasks(client, admin, make_ticket):
     assert r.status_code == 400
 
 
-def test_an_epic_cannot_own_subtasks(client, admin, make_ticket):
-    """Epics group tickets. That's a different relationship."""
-    epic = make_ticket(ticket_type="epic")
-    r = client.post(
-        f"/tickets/{epic['id']}/subtasks", json={"title": "Nope"}, headers=auth(admin["token"])
-    )
-    assert r.status_code == 400
-
-
 def test_deleting_a_parent_cascades_to_its_subtasks(client, admin, make_ticket):
     parent = make_ticket()
     client.post(
@@ -77,57 +68,11 @@ def test_deleting_a_parent_cascades_to_its_subtasks(client, admin, make_ticket):
     assert everything == []
 
 
-# ---------------------------------------------------------------- epic progress
-
-def test_epic_progress_prefers_points_over_ticket_count(client, admin, make_ticket):
-    """A 13-point story finishing is more progress than a 1-point one, and a
-    raw count hides that."""
-    epic = make_ticket(title="Epic", ticket_type="epic")
-    make_ticket(title="Big", epic_id=epic["id"], story_points=9, status="done")
-    make_ticket(title="Small", epic_id=epic["id"], story_points=1, status="todo")
-
-    fresh = client.get(f"/tickets/{epic['id']}", headers=auth(admin["token"])).json()
-    p = fresh["progress"]
-
-    assert p["done"] == 1 and p["total"] == 2
-    assert p["points_done"] == 9 and p["points_total"] == 10
-    assert p["percent"] == 90  # points, not the 50% a ticket count would give
-
-
-def test_epic_with_no_children_is_zero_not_a_crash(client, admin, make_ticket):
-    epic = make_ticket(ticket_type="epic")
-    assert epic["progress"]["percent"] == 0
-    assert epic["progress"]["total"] == 0
-
-
-def test_a_non_epic_has_no_progress_block(client, admin, make_ticket):
-    assert make_ticket(ticket_type="task")["progress"] is None
-
-
-# ---------------------------------------------------------------- convert
-
-def test_convert_to_epic_promotes_subtasks_rather_than_deleting_them(client, admin, make_ticket):
-    """An epic can't own sub-tasks, and parent_id cascades on delete — so a
-    naive conversion would silently destroy them."""
-    parent = make_ticket(title="Grew too big")
-    st = client.post(
-        f"/tickets/{parent['id']}/subtasks", json={"title": "Survivor"}, headers=auth(admin["token"])
-    ).json()
-
-    converted = client.post(
-        f"/tickets/{parent['id']}/convert-to-epic", headers=auth(admin["token"])
-    ).json()
-    assert converted["ticket_type"] == "epic"
-    assert converted["subtasks"] == []
-
-    everything = client.get("/tickets/?include_subtasks=true", headers=auth(admin["token"])).json()
-    survivor = next(t for t in everything if t["key"] == st["key"])
-    assert survivor["parent_id"] is None
-    assert survivor["epic_id"] == converted["id"]
-    assert survivor["ticket_type"] == "task"
-
-
-def test_converting_an_epic_again_is_rejected(client, admin, make_ticket):
-    epic = make_ticket(ticket_type="epic")
-    r = client.post(f"/tickets/{epic['id']}/convert-to-epic", headers=auth(admin["token"]))
-    assert r.status_code == 400
+# The Epic feature (progress rollups, /convert-to-epic, epics blocking their
+# own subtasks) was deliberately replaced by Parent Tags -- see the TicketType
+# enum comment in models.py ("the one epic became a parent tag"). TicketType.EPIC
+# stays in the enum only so old rows keep parsing; nothing new creates one, and
+# the progress block / convert route were removed along with the rest of the
+# feature. NOTE: Parent Tags itself has no test coverage yet -- worth adding,
+# but that's new coverage to write, not a regression in what used to be tested
+# here.

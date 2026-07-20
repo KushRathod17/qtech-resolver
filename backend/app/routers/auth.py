@@ -71,14 +71,24 @@ def signup_join_organization(payload: SignupJoinOrganization, db: Session = Depe
     if crud.get_user_by_email(db, payload.email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    # An empty allowlist must mean CLOSED, not "no restriction" -- that's the
+    # whole point of the safe-default documented on Settings.ALLOWED_SIGNUP_DOMAINS.
+    # The previous version of this check only ran the domain test when the list
+    # was non-empty, which silently skipped it entirely when empty -- letting
+    # anyone with a valid join code in regardless of email domain. Since the
+    # deployed default IS empty, that was a live hole, not a theoretical one.
     allowed_domains = settings.allowed_signup_domains
-    if allowed_domains:
-        domain = payload.email.split("@")[-1].lower()
-        if domain not in allowed_domains:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Only {', '.join(allowed_domains)} addresses can sign up this way.",
-            )
+    domain = payload.email.split("@")[-1].lower()
+    if not allowed_domains:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sign up this way is currently closed. Ask an admin to add you directly instead.",
+        )
+    if domain not in allowed_domains:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Only {', '.join(allowed_domains)} addresses can sign up this way.",
+        )
 
     org = crud.get_organization(db, payload.organization_id)
     # Same error either way -- a wrong code and a nonexistent org must look
