@@ -194,17 +194,6 @@ def label(client, dev):
 
 
 @pytest.fixture()
-def component(client, manager):
-    r = client.post(
-        "/components/",
-        json={"name": "OTRAMS-Booking", "description": "Booking engine", "color": "#3E7BFA"},
-        headers=auth(manager["token"]),
-    )
-    assert r.status_code == 201, r.text
-    return r.json()
-
-
-@pytest.fixture()
 def make_ticket(client, admin):
     """Factory — most tests want a ticket with one or two fields tweaked."""
     def _make(token=None, **fields):

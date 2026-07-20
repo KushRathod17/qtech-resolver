@@ -200,17 +200,6 @@ def test_a_comment_without_mentions_still_works(client, admin, make_ticket):
     assert r.status_code == 201
 
 
-# ---------------------------------------------------------------- components
-
-def test_developers_cannot_create_a_component(client, dev):
-    r = client.post("/components/", json={"name": "Sneaky"}, headers=auth(dev["token"]))
-    assert r.status_code == 403
-
-
-def test_deleting_a_component_keeps_its_tickets(client, manager, admin, component, make_ticket):
-    """ON DELETE SET NULL — the tickets survive, they just lose the component."""
-    t = make_ticket(component_id=component["id"])
-    client.delete(f"/components/{component['id']}", headers=auth(manager["token"]))
-
-    fresh = client.get(f"/tickets/{t['id']}", headers=auth(admin["token"])).json()
-    assert fresh["component"] is None
+# The Components feature (and its /components/ endpoint) was removed in favor
+# of a plain `product` string field on the ticket -- there's no create/delete
+# lifecycle left to test here. See models.py's `product` column comment.

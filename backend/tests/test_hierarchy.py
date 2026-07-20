@@ -2,10 +2,10 @@
 from tests.conftest import auth
 
 
-def test_subtask_inherits_its_parents_context(client, admin, component, make_ticket):
+def test_subtask_inherits_its_parents_context(client, admin, make_ticket):
     """A sub-task nobody can be bothered to fill in is a sub-task that doesn't
     get filed — so it inherits rather than asking."""
-    parent = make_ticket(component_id=component["id"], client_name="Kesari Tours", priority="highest")
+    parent = make_ticket(product="OTRAMS-Booking", client_name="Kesari Tours", priority="highest")
     r = client.post(
         f"/tickets/{parent['id']}/subtasks",
         json={"title": "Write the migration"},
@@ -16,7 +16,7 @@ def test_subtask_inherits_its_parents_context(client, admin, component, make_tic
 
     assert st["ticket_type"] == "subtask"
     assert st["parent_id"] == parent["id"]
-    assert st["component"]["name"] == "OTRAMS-Booking"
+    assert st["product"] == "OTRAMS-Booking"
     assert st["client_name"] == "Kesari Tours"
     assert st["priority"] == "highest"
 
