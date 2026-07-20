@@ -22,14 +22,22 @@ TEST_DB = "qtech_resolver_test"
 TEST_URL = settings.DATABASE_URL.rsplit("/", 1)[0] + f"/{TEST_DB}"
 
 
+# The invite code every registration must present. Tests set their own rather
+# than reading the developer's .env, so the suite passes on a machine where
+# registration is (correctly) closed.
+TEST_INVITE_CODE = "test-invite-code"
+
+
 @pytest.fixture(autouse=True)
 def _test_signup_domain(monkeypatch):
     """Tests must not depend on the developer's .env.
 
-    Real deployments close self-registration (ALLOWED_SIGNUP_DOMAINS), which
-    would otherwise block the fixtures that register @qtechtest.io users. Tests
-    that specifically exercise the domain gate override this.
+    Real deployments gate registration behind INVITE_CODE and may narrow it
+    further with ALLOWED_SIGNUP_DOMAINS; either would otherwise block the
+    fixtures that register @qtechtest.io users. Tests that specifically
+    exercise those gates override this.
     """
+    monkeypatch.setattr(settings, "INVITE_CODE", TEST_INVITE_CODE)
     monkeypatch.setattr(settings, "ALLOWED_SIGNUP_DOMAINS", "qtechtest.io")
     yield
 
@@ -130,6 +138,7 @@ def _register(client, email, name, password="password123"):
             "password": password,
             "organization_id": orgs[0]["id"],
             "join_code": TEST_ORG_JOIN_CODE,
+            "invite_code": TEST_INVITE_CODE,
         },
     )
     assert r.status_code == 201, r.text

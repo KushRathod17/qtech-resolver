@@ -8,20 +8,24 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     CORS_ORIGINS: str = "http://localhost:5173"
 
-    # Who may self-register. Comma-separated email domains, e.g.
+    # The shared secret every registration must present, handed to the team
+    # out of band. This is the PRIMARY gate on both signup paths -- creating a
+    # new organization and joining an existing one.
+    #
+    # EMPTY MEANS REGISTRATION IS CLOSED ENTIRELY. Unset must never read as
+    # "no restriction": a blank env var is far more likely to be a
+    # misconfiguration (typo in the key, forgotten on a new service) than a
+    # deliberate decision to let the whole internet register. Failing closed
+    # turns that mistake into a support ticket instead of a data breach.
+    INVITE_CODE: str = ""
+
+    # An OPTIONAL extra restriction on top of the invite code, narrowing who may
+    # join an existing organization. Comma-separated email domains, e.g.
     # "qtechsoftware.com,bizinso.com".
     #
-    # EMPTY MEANS SELF-REGISTRATION IS CLOSED — that is the safe default, and it
-    # is deliberate. Signup used to be wide open: anyone who found the URL got an
-    # account and could read every ticket, every client name and every
-    # attachment. For a tool holding travel-agency customer data that is a
-    # confidentiality breach, not a convenience.
-    #
-    # This only gates JOINING an existing organization (POST /auth/signup/join).
-    # Starting a brand-new organization (POST /auth/signup/organization) is
-    # never domain-gated -- there's nothing to protect yet, since the org
-    # doesn't exist until that call creates it. That's how a fresh install (or
-    # a new customer's workspace) gets bootstrapped.
+    # Empty means "no domain restriction" -- which is safe here only because
+    # INVITE_CODE above is mandatory and independently blocks registration when
+    # unset. This setting is a second filter, never the sole gate.
     ALLOWED_SIGNUP_DOMAINS: str = ""
 
     # Failed logins allowed from one IP (or against one email) before the door
@@ -44,6 +48,12 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+
+    @property
+    def invite_code(self) -> str:
+        """Stripped, so a trailing newline pasted into the Render dashboard
+        doesn't silently make every correct code fail."""
+        return self.INVITE_CODE.strip()
 
     @property
     def allowed_signup_domains(self) -> list[str]:

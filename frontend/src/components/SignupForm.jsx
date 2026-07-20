@@ -56,6 +56,28 @@ function PasswordFields({ password, setPassword, confirm, setConfirm }) {
   );
 }
 
+/** The shared out-of-band secret (INVITE_CODE on the server), required on both
+ * signup paths. Distinct from an organization's join code, which the join step
+ * asks for separately -- hence the explicit hint, since two different codes on
+ * one form is otherwise a good way to have people paste the wrong one. */
+function InviteCodeField({ id, value, onChange }) {
+  return (
+    <div className="field">
+      <label htmlFor={id}>Invite code</label>
+      <input
+        id={id}
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="The code you were given"
+        autoComplete="off"
+        required
+      />
+      <p className="field-hint">Shared with you by QTech. Not your organization's join code.</p>
+    </div>
+  );
+}
+
 function validatePassword(password, confirm) {
   if (password.length < MIN_PASSWORD) return `Password must be at least ${MIN_PASSWORD} characters.`;
   if (password.length > MAX_PASSWORD) return `Password must be ${MAX_PASSWORD} characters or fewer.`;
@@ -72,6 +94,7 @@ function CreateOrgStep({ onBack }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -87,6 +110,7 @@ function CreateOrgStep({ onBack }) {
     e.preventDefault();
     setError("");
 
+    if (!inviteCode.trim()) return setError("Enter the invite code you were given.");
     if (!orgName.trim()) return setError("Give your organization a name.");
     if (keyPrefix.trim().length < 2) return setError("Ticket key prefix needs at least 2 characters.");
     if (!fullName.trim()) return setError("Please enter your name.");
@@ -101,6 +125,7 @@ function CreateOrgStep({ onBack }) {
         password,
         organizationName: orgName.trim(),
         keyPrefix: keyPrefix.trim(),
+        inviteCode: inviteCode.trim(),
       });
       navigate("/board");
     } catch (err) {
@@ -112,6 +137,8 @@ function CreateOrgStep({ onBack }) {
 
   return (
     <form onSubmit={handleSubmit}>
+      <InviteCodeField id="su-invite-code" value={inviteCode} onChange={setInviteCode} />
+
       <div className="field">
         <label htmlFor="su-org-name">Organization name</label>
         <input
@@ -190,6 +217,7 @@ function JoinOrgStep({ onBack }) {
   const [selectedOrg, setSelectedOrg] = useState(null);
 
   const [joinCode, setJoinCode] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -226,6 +254,7 @@ function JoinOrgStep({ onBack }) {
     setError("");
 
     if (!selectedOrg) return setError("Pick your organization first.");
+    if (!inviteCode.trim()) return setError("Enter the invite code you were given.");
     if (!joinCode.trim()) return setError("Enter the join code someone at your organization gave you.");
     if (!fullName.trim()) return setError("Please enter your name.");
     const pwError = validatePassword(password, confirm);
@@ -239,6 +268,7 @@ function JoinOrgStep({ onBack }) {
         password,
         organizationId: selectedOrg.id,
         joinCode: joinCode.trim(),
+        inviteCode: inviteCode.trim(),
       });
       navigate("/board");
     } catch (err) {
@@ -299,6 +329,8 @@ function JoinOrgStep({ onBack }) {
           <button type="button" className="btn-secondary" onClick={() => setSelectedOrg(null)}>Change</button>
         </div>
       </div>
+
+      <InviteCodeField id="su-invite-code-join" value={inviteCode} onChange={setInviteCode} />
 
       <div className="field">
         <label htmlFor="su-join-code">Join code</label>

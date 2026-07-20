@@ -42,25 +42,27 @@ export function AuthProvider({ children }) {
   // (first person in an org is its admin, everyone after is a developer):
   // accepting a role from the client is the privilege-escalation hole that
   // used to exist here.
-  const signupNewOrganization = async ({ fullName, email, password, organizationName, keyPrefix }) => {
+  const signupNewOrganization = async ({ fullName, email, password, organizationName, keyPrefix, inviteCode }) => {
     const { data } = await apiClient.post("/auth/signup/organization", {
       full_name: fullName,
       email,
       password,
       organization_name: organizationName,
       key_prefix: keyPrefix,
+      invite_code: inviteCode,
     });
     localStorage.setItem("access_token", data.access_token);
     setToken(data.access_token);
   };
 
-  const signupJoinOrganization = async ({ fullName, email, password, organizationId, joinCode }) => {
+  const signupJoinOrganization = async ({ fullName, email, password, organizationId, joinCode, inviteCode }) => {
     const { data } = await apiClient.post("/auth/signup/join", {
       full_name: fullName,
       email,
       password,
       organization_id: organizationId,
       join_code: joinCode,
+      invite_code: inviteCode,
     });
     localStorage.setItem("access_token", data.access_token);
     setToken(data.access_token);

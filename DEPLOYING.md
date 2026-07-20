@@ -103,6 +103,16 @@ had), so the browser never talks to Backblaze directly.
    - `S3_SECRET_ACCESS_KEY` → the applicationKey from step 3
    - `S3_BUCKET_NAME` → `qtech-resolver-uploads`
    - `S3_REGION` → the region code from the endpoint (e.g. `us-west-004`)
+   - `INVITE_CODE` → the code your team types in to register. Generate one with
+     `python -c "import secrets; print(secrets.token_urlsafe(12))"` and share it
+     out of band (chat, password manager) — never in this repo.
+
+   **Leaving `INVITE_CODE` blank blocks all registration**, on purpose: an unset
+   gate must never read as an open one. Existing users can still log in, so if
+   signups start failing with *"Registration is closed"*, this env var is the
+   first thing to check. To rotate it, change it here and redeploy — anyone
+   holding the old code can no longer register, and existing accounts are
+   unaffected.
 4. Click **Apply**. Render builds both services. The backend's
    `preDeployCommand` runs `alembic upgrade head` automatically before each
    deploy, so the database schema is created on this first deploy too — you
