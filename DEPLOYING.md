@@ -26,6 +26,33 @@ Only env vars and `render.yaml` would change.
 
 ---
 
+## Running locally
+
+Three terminals, each left running:
+
+1. **Database** (once per reboot — this is a private, non-service Postgres
+   cluster, not the system one):
+   ```
+   .\scripts\start-db.ps1
+   ```
+2. **Backend**:
+   ```
+   .\scripts\start-backend.ps1
+   ```
+   This runs `uvicorn` with `--host "::"` instead of the default
+   `127.0.0.1`. Without it, Chrome's `localhost` can resolve to the IPv6
+   address `::1` first, find nothing listening there, and get a connection
+   refused — which shows up in devtools as a misleading
+   "No 'Access-Control-Allow-Origin' header is present" error that looks
+   like a CORS bug but is actually the server never being reached at all.
+   `"::"` listens on both IPv4 and IPv6, so `localhost` resolves either way.
+3. **Frontend**:
+   ```
+   cd frontend
+   npm run dev
+   ```
+   Then open the URL it prints (usually `http://localhost:5173`).
+
 ## 1. Push the code to GitHub
 
 Render deploys from a Git repo. If this project isn't already on GitHub, push
