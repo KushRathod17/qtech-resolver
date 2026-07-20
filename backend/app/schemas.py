@@ -742,3 +742,29 @@ class ActivityLogOut(BaseModel):
     details: Optional[str]
     actor: Optional[UserOut]
     created_at: datetime
+
+
+# ---------- Bookings ----------
+class BookingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    booking_code: str
+    current_status: Optional[str]
+    create_date: Optional[datetime]
+    confirmation_number: Optional[str]
+    leader_full_name: Optional[str]
+    service_date: Optional[date]
+    check_out_date: Optional[date]
+    client_name: Optional[str]
+    imported_at: Optional[datetime]
+    source_file: Optional[str]
+
+
+class BookingImportResult(BaseModel):
+    """What an import actually did, so 'I uploaded it, did it work?' has a real
+    answer instead of a silent 200."""
+    created: int
+    updated: int
+    skipped: int
+    skipped_reasons: list[str] = Field(default_factory=list)
+    total_rows: int

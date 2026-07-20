@@ -2700,6 +2700,43 @@ body { background: var(--color-bg); color: var(--color-text); }
 
 
 /* ==========================================================================
+   Bookings
+   ========================================================================== */
+.bookings-page {
+  padding: 24px 28px 40px;
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.filter-bar .search-input {
+  flex: 1;
+  min-width: 220px;
+}
+.filter-bar select,
+.filter-bar input:not(.search-input) {
+  background: var(--color-panel-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.banner-info {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(62, 123, 250, 0.1);
+  border: 1px solid var(--color-accent);
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+/* ==========================================================================
    Cross-team workflow
    ========================================================================== */
 .workflow-page {

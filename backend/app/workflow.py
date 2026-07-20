@@ -123,9 +123,13 @@ def available_actions(ticket, viewer) -> list[ActionSpec]:
     buttons. Returns [] when the viewer isn't the holder — which is the answer,
     not an error.
     """
-    # Not in the workflow at all (every ticket predating this feature).
+    # Not in the workflow yet. There's no "current holder" to restrict this to
+    # -- anyone in the org may raise it, the same as anyone may pick a target
+    # team when CREATING a ticket. This is also the path for every ticket that
+    # predates the workflow feature: it doesn't strand them, it just means
+    # "raising" is the only thing anyone can do to them until someone does.
     if ticket.current_team_id is None:
-        return []
+        return [RAISE_SPEC]
 
     # You may act only if the ticket is with you, or with your team. Being on
     # the right team but not the named person is still allowed — otherwise one

@@ -578,3 +578,52 @@ class ActivityLog(Base):
 
     ticket = relationship("Ticket", back_populates="activity_logs")
     actor = relationship("User")
+
+
+class Booking(Base):
+    """
+    A row of operational booking data imported from a supplier export (e.g. a
+    TBO voucher report), so Support/Testing can look up a booking's status
+    without leaving the ticketing tool.
+
+    Deliberately NOT linked to Ticket by foreign key -- a booking may exist
+    with zero tickets against it (the common case) or several, and forcing a
+    link at import time would mean rejecting rows for bookings nobody has
+    raised a ticket about yet. `booking_code` is the natural join key; the UI
+    matches on it at read time instead.
+    """
+    __tablename__ = "bookings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"),
+                             nullable=False, index=True)
+
+    # Unique per org, not globally -- two tenants could both have booking
+    # ALH05408 from the same supplier. Re-importing a file with the same code
+    # updates the existing row instead of duplicating it (see crud.import_bookings),
+    # which is what lets a fresher export just be re-uploaded to refresh status.
+    booking_code = Column(String, nullable=False, index=True)
+
+    # Free string, not a Postgres enum -- deliberately, same reasoning as
+    # HandoffAction: this comes from an external supplier's own vocabulary
+    # ("vouchered", "cancelled", "failed", ...), which this app doesn't
+    # control and shouldn't have to migrate the schema every time it changes.
+    current_status = Column(String, nullable=True, index=True)
+
+    create_date = Column(DateTime, nullable=True)
+    confirmation_number = Column(String, nullable=True)
+    leader_full_name = Column(String, nullable=True)
+    service_date = Column(Date, nullable=True)
+    check_out_date = Column(Date, nullable=True)
+    client_name = Column(String, nullable=True, index=True)
+
+    # When this row was last created/refreshed by an import, and which file it
+    # came from -- so "is this stale?" is answerable at a glance.
+    imported_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    source_file = Column(String, nullable=True)
+
+    organization = relationship("Organization")
+
+    __table_args__ = (
+        Index("ix_bookings_org_code", "organization_id", "booking_code", unique=True),
+    )

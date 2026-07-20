@@ -8,6 +8,7 @@ const NAV = [
   { to: "/backlog", label: "Backlog", icon: "☰" },
   { to: "/board", label: "Board", icon: "▦" },
   { to: "/workflow", label: "Workflow", icon: "⇄" },
+  { to: "/bookings", label: "Bookings", icon: "✈" },
   { to: "/people", label: "People", icon: "☺" },
   { to: "/reports", label: "Reports", icon: "◔" },
   // Sprints deliberately left out of the nav -- not part of how this team

@@ -13,6 +13,7 @@ import ParentTags from "./pages/ParentTags";
 import Issues from "./pages/Issues";
 import Backlog from "./pages/Backlog";
 import Workflow from "./pages/Workflow";
+import Bookings from "./pages/Bookings";
 import People from "./pages/People";
 import MyTickets from "./pages/MyTickets";
 import ChangePassword from "./pages/ChangePassword";
@@ -47,6 +48,7 @@ function AppRoutes() {
         <Route path="/backlog" element={<Backlog />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/workflow" element={<Workflow />} />
+        <Route path="/bookings" element={<Bookings />} />
         <Route path="/people" element={<People />} />
         <Route path="/my-tickets" element={<MyTickets />} />
         <Route path="/sprints" element={<Sprints />} />

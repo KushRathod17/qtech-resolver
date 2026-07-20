@@ -1077,7 +1077,14 @@ def perform_handoff(
     handoff = models.TicketHandoff(
         organization_id=ticket.organization_id,
         ticket_id=ticket.id,
-        from_team_id=ticket.current_team_id,
+        # A ticket already in the workflow hands off FROM whoever currently
+        # holds it. A ticket being RAISED for the first time has no holder yet
+        # -- current_team_id is None -- so the chain's starting point is
+        # whoever is doing the raising, same as raise_into_workflow() records
+        # for a ticket routed at creation time. Without this fallback the very
+        # first row in an existing ticket's chain would show "from: nobody"
+        # even though a person clearly did the raising.
+        from_team_id=ticket.current_team_id if ticket.current_team_id is not None else actor.team_id,
         from_user_id=actor.id,
         to_team_id=target_team.id if target_team else None,
         to_user_id=target_user.id if target_user else None,
@@ -2231,3 +2238,145 @@ def get_comments_for_ticket(db: Session, ticket_id: uuid.UUID) -> list[models.Co
         .order_by(models.Comment.created_at)
         .all()
     )
+
+
+# ---------- Bookings ----------
+# Columns a supplier export is expected to have, in the shape openpyxl hands
+# back a header row -- lower-cased and stripped so "Booking_Code " or
+# "BOOKING CODE" both still match, since these are hand-exported spreadsheets,
+# not an API contract.
+BOOKING_COLUMNS = {
+    "booking_code", "current_status", "create_date", "confirmation_number",
+    "leader_full_name", "service_date", "check_out_date", "client_name",
+}
+
+
+def get_bookings(
+    db: Session,
+    organization_id: uuid.UUID,
+    search: str | None = None,
+    status: str | None = None,
+    client_name: str | None = None,
+) -> list[models.Booking]:
+    query = db.query(models.Booking).filter(models.Booking.organization_id == organization_id)
+
+    if search:
+        term = f"%{search}%"
+        query = query.filter(
+            models.Booking.booking_code.ilike(term)
+            | models.Booking.confirmation_number.ilike(term)
+            | models.Booking.leader_full_name.ilike(term)
+            | models.Booking.client_name.ilike(term)
+        )
+    if status:
+        query = query.filter(models.Booking.current_status == status)
+    if client_name:
+        query = query.filter(models.Booking.client_name.ilike(f"%{client_name}%"))
+
+    return query.order_by(models.Booking.create_date.desc().nullslast()).all()
+
+
+def get_booking_statuses(db: Session, organization_id: uuid.UUID) -> list[str]:
+    """Distinct statuses actually present, for the filter dropdown -- built
+    from real data rather than a hard-coded list, since the supplier's own
+    vocabulary of statuses isn't this app's to define."""
+    rows = (
+        db.query(models.Booking.current_status)
+        .filter(models.Booking.organization_id == organization_id, models.Booking.current_status.isnot(None))
+        .distinct()
+        .all()
+    )
+    return sorted({r[0] for r in rows})
+
+
+def import_bookings(
+    db: Session,
+    organization_id: uuid.UUID,
+    rows: list[dict],
+    source_file: str,
+) -> schemas.BookingImportResult:
+    """Upsert-imports parsed spreadsheet rows, keyed on booking_code.
+
+    Re-uploading a fresher export of the same bookings is the expected
+    workflow (a booking's status changes over its lifecycle), so an existing
+    booking_code updates in place rather than creating a duplicate row --
+    that's the whole point of `imported_at`/`source_file` tracking "when did
+    this last refresh," not "how many times has this been uploaded."
+    """
+    existing = {
+        b.booking_code: b
+        for b in db.query(models.Booking).filter(models.Booking.organization_id == organization_id).all()
+    }
+
+    created = updated = skipped = 0
+    skipped_reasons: list[str] = []
+    now = datetime.utcnow()
+
+    for i, row in enumerate(rows, start=2):  # row 1 is the header
+        code = (row.get("booking_code") or "").strip()
+        if not code:
+            skipped += 1
+            if len(skipped_reasons) < 20:
+                skipped_reasons.append(f"Row {i}: missing booking_code")
+            continue
+
+        fields = {
+            "current_status": (row.get("current_status") or "").strip() or None,
+            "create_date": _coerce_datetime(row.get("create_date")),
+            "confirmation_number": (row.get("confirmation_number") or "").strip() or None,
+            "leader_full_name": (row.get("leader_full_name") or "").strip() or None,
+            "service_date": _coerce_date(row.get("service_date")),
+            "check_out_date": _coerce_date(row.get("check_out_date")),
+            "client_name": (row.get("client_name") or "").strip() or None,
+        }
+
+        if code in existing:
+            booking = existing[code]
+            for field, value in fields.items():
+                setattr(booking, field, value)
+            booking.imported_at = now
+            booking.source_file = source_file
+            updated += 1
+        else:
+            booking = models.Booking(
+                organization_id=organization_id,
+                booking_code=code,
+                imported_at=now,
+                source_file=source_file,
+                **fields,
+            )
+            db.add(booking)
+            existing[code] = booking
+            created += 1
+
+    db.commit()
+    return schemas.BookingImportResult(
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        skipped_reasons=skipped_reasons,
+        total_rows=len(rows),
+    )
+
+
+def _coerce_datetime(value):
+    """openpyxl hands back native datetime objects for date-formatted cells,
+    but a plain string if the source column wasn't formatted as a date --
+    this accepts either rather than rejecting the whole row."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day)
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(str(value).strip(), fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _coerce_date(value):
+    dt = _coerce_datetime(value)
+    return dt.date() if dt else None

@@ -337,11 +337,63 @@ def test_tickets_outside_the_workflow_are_untouched(client, admin, make_ticket):
     """The 26 pre-existing tickets must keep working."""
     t = make_ticket(title="Old ticket")
     assert t["current_team"] is None
-    assert t["available_actions"] == []
+    # Not stranded outside the workflow forever -- "raise" is the one thing
+    # anyone can still do to it. No OTHER action is on offer, since there's no
+    # holder yet to have decided anything.
+    assert {a["action"] for a in t["available_actions"]} == {"raised"}
     assert t["handoff_count"] == 0
 
     rows = client.get("/reports/workflow", headers=auth(admin["token"])).json()
     assert t["id"] not in [r["ticket_id"] for r in rows]
+
+
+def test_an_existing_ticket_can_be_raised_into_the_workflow_later(client, admin, support, tester, make_ticket):
+    """A ticket created without routing isn't stuck outside the workflow --
+    anyone can raise it later, same as picking a team at creation time would
+    have."""
+    t = make_ticket(title="Forgot to route this one", status="in_progress")
+    assert t["current_team"] is None
+    assert {a["action"] for a in t["available_actions"]} == {"raised"}
+
+    r = handoff(client, support["token"], t["id"], "raised", to_user_id=tester["id"], note="Routing this in after all.")
+    assert r.status_code == 200, r.text
+    moved = r.json()
+
+    assert moved["current_team"]["kind"] == "testing"
+    assert moved["assignee"]["id"] == tester["id"]
+    # RAISE_SPEC's resulting_status is TODO -- the ticket had drifted to
+    # in_progress on the plain board before it ever entered the workflow, and
+    # entering it resets that, same as every other handoff keeps status and
+    # custody in lockstep.
+    assert moved["status"] == "todo"
+
+    # It's reachable by the current holder now, same as any freshly-handed-off
+    # ticket -- the whole point of raising it.
+    assert actions_for(client, tester["token"], t["id"]) == {
+        "forwarded", "returned_not_reproducible",
+    }
+
+    # The chain of custody records WHO raised it, not "nobody" -- Support's
+    # own team, even though the ticket had no holder a moment ago.
+    chain = client.get(f"/tickets/{t['id']}/handoffs", headers=auth(support["token"])).json()
+    assert len(chain) == 1
+    assert chain[0]["action"] == "raised"
+    assert chain[0]["from_team"]["kind"] == "support"
+    assert chain[0]["from_user"]["id"] == support["id"]
+    assert chain[0]["to_user"]["id"] == tester["id"]
+
+    # And it now shows up in the workflow report, exactly like a ticket routed
+    # at creation time would.
+    rows = client.get("/reports/workflow", headers=auth(admin["token"])).json()
+    assert t["id"] in [row["ticket_id"] for row in rows]
+
+
+def test_raising_to_someone_outside_testing_is_rejected(client, support, developer, make_ticket):
+    """Raising always goes to Testing first -- the chain can't skip straight
+    to Development just because the raiser picked someone there."""
+    t = make_ticket(title="No shortcuts")
+    r = handoff(client, support["token"], t["id"], "raised", to_user_id=developer["id"])
+    assert r.status_code == 400, r.text
 
 
 def test_filter_the_board_by_what_my_team_is_holding(client, tester, developer, raised, teams):

@@ -68,6 +68,7 @@ const NAV = [
   { id: "nav-board", label: "Go to Board", to: "/board", hint: "Navigation" },
   { id: "nav-backlog", label: "Go to Backlog", to: "/backlog", hint: "Navigation" },
   { id: "nav-workflow", label: "Go to Workflow", to: "/workflow", hint: "Navigation" },
+  { id: "nav-bookings", label: "Go to Bookings", to: "/bookings", hint: "Navigation" },
   { id: "nav-people", label: "Go to People", to: "/people", hint: "Navigation" },
   { id: "nav-my-tickets", label: "Go to My Tickets", to: "/my-tickets", hint: "Navigation" },
   { id: "nav-reports", label: "Go to Reports", to: "/reports", hint: "Navigation" },

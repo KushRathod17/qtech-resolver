@@ -145,6 +145,18 @@ export const sprintsApi = {
   velocity: () => apiClient.get("/sprints/velocity").then((r) => r.data),
 };
 
+export const bookingsApi = {
+  // filters: { search, status_, client_name }
+  list: (filters = {}) =>
+    apiClient.get("/bookings/", { params: cleanParams(filters) }).then((r) => r.data),
+  statuses: () => apiClient.get("/bookings/statuses").then((r) => r.data),
+  import: (file) => {
+    const body = new FormData();
+    body.append("file", file);
+    return apiClient.post("/bookings/import", body).then((r) => r.data);
+  },
+};
+
 export const usersApi = {
   list: () => apiClient.get("/users/").then((r) => r.data),
   setRole: (id, role) => apiClient.patch(`/users/${id}/role`, { role }).then((r) => r.data),
