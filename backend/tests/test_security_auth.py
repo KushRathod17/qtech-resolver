@@ -12,7 +12,7 @@ import pytest
 from app.config import settings
 from app.routers.auth import login_limiter
 from tests.conftest import (
-    auth, _register, _token, TEST_ORG_NAME, TEST_ORG_JOIN_CODE, TEST_INVITE_CODE,
+    auth, _register, _token, TEST_ORG_NAME, TEST_ORG_JOIN_CODE,
 )
 
 
@@ -32,20 +32,13 @@ def open_to_qtech(monkeypatch):
 
 @pytest.fixture()
 def no_domain_restriction(monkeypatch):
-    """No domain allowlist. Registration is still gated -- by the invite code."""
+    """No domain allowlist configured. This must mean joining is CLOSED, not
+    open -- that's the safe default documented on Settings.ALLOWED_SIGNUP_DOMAINS."""
     monkeypatch.setattr(settings, "ALLOWED_SIGNUP_DOMAINS", "")
     yield
 
 
-@pytest.fixture()
-def invite_code_unset(monkeypatch):
-    """The operator never configured INVITE_CODE (or blanked it by accident)."""
-    monkeypatch.setattr(settings, "INVITE_CODE", "")
-    yield
-
-
-def _join(client, email, password="password123", join_code=TEST_ORG_JOIN_CODE,
-          invite_code=TEST_INVITE_CODE):
+def _join(client, email, password="password123", join_code=TEST_ORG_JOIN_CODE):
     """Same two-step flow a real signup uses: find the org by name, then the
     join code is what actually gets you in."""
     orgs = client.get("/organizations/search", params={"name": TEST_ORG_NAME}).json()
@@ -55,19 +48,16 @@ def _join(client, email, password="password123", join_code=TEST_ORG_JOIN_CODE,
         json={
             "email": email, "full_name": "Someone", "password": password,
             "organization_id": org_id, "join_code": join_code,
-            "invite_code": invite_code,
         },
     )
 
 
-def _create_org(client, org_name, email, password="password123", key_prefix="TST",
-                invite_code=TEST_INVITE_CODE):
+def _create_org(client, org_name, email, password="password123", key_prefix="TST"):
     return client.post(
         "/auth/signup/organization",
         json={
             "email": email, "full_name": "Someone", "password": password,
             "organization_name": org_name, "key_prefix": key_prefix,
-            "invite_code": invite_code,
         },
     )
 
@@ -78,76 +68,22 @@ def _role_of(client, token):
 
 # ---------------------------------------------------------------- registration
 
-def test_creating_a_new_organization_needs_the_invite_code(client, no_domain_restriction):
-    """Starting your own workspace has no domain gate — but it still takes the
-    invite code, because creating an org is how a stranger gets a foothold in
-    the product. With the code, the founder becomes its admin."""
+def test_creating_a_new_organization_has_no_gate(client):
+    """Starting your own workspace is never domain-gated -- there's nothing to
+    protect yet, since the org doesn't exist until this call creates it. The
+    founder becomes its admin."""
     r = _create_org(client, "Founder Inc", "founder@anywhere.io")
     assert r.status_code == 201
     assert _role_of(client, r.json()["access_token"]) == "admin"
 
 
-def test_with_no_allowed_domains_the_invite_code_still_gates_joining(client, admin, no_domain_restriction):
-    """No domain allowlist is not the same as no gate: the invite code is the
-    door, the domain list only narrows it."""
-    assert _join(client, "randomer@gmail.com").status_code == 201
-    assert _join(client, "impostor@gmail.com", invite_code="not-the-code").status_code == 403
-
-
-# ---------------------------------------------------------------- invite code
-
-def test_a_wrong_invite_code_is_rejected_on_both_paths(client, admin, no_domain_restriction):
-    join = _join(client, "guesser@gmail.com", invite_code="wrong-code")
-    assert join.status_code == 403
-    assert "invite code" in join.json()["detail"].lower()
-
-    create = _create_org(client, "Guess Inc", "guesser2@gmail.com", invite_code="wrong-code")
-    assert create.status_code == 403
-    assert "invite code" in create.json()["detail"].lower()
-
-
-def test_an_unset_invite_code_blocks_registration_entirely(client, admin, invite_code_unset,
-                                                           no_domain_restriction):
-    """An unset gate must never read as an open one -- a blank env var is far
-    likelier to be a misconfiguration than a decision to let the internet in.
-
-    Asserting "no account was created" rather than one exact status: an empty
-    string is refused by the schema (422) and a wrong one by the gate (403).
-    Both are correct; what must never happen is a 201.
-    """
-    for supplied in ("", "anything", TEST_INVITE_CODE):
-        assert _join(client, f"x{supplied}@gmail.com", invite_code=supplied).status_code != 201
-        assert _create_org(client, f"Org {supplied}", f"y{supplied}@gmail.com",
-                           invite_code=supplied).status_code != 201
-
-
-def test_the_refusal_never_echoes_the_real_invite_code(client, admin, no_domain_restriction):
-    """The error is shown to an unauthenticated stranger -- it must not hand
-    them the secret they just failed to guess."""
-    detail = _join(client, "guesser@gmail.com", invite_code="wrong-code").json()["detail"]
-    assert TEST_INVITE_CODE not in detail
-
-
-def test_surrounding_whitespace_on_the_invite_code_is_forgiven(client, admin, no_domain_restriction):
-    """Pasting a code out of a chat message routinely brings a space with it.
-    That's not an attack, and failing it just generates a support ticket."""
-    assert _join(client, "paster@gmail.com", invite_code=f"  {TEST_INVITE_CODE}\n").status_code == 201
-
-
-def test_the_invite_code_is_case_SENSITIVE(client, admin, no_domain_restriction):
-    """Unlike the domain check. It's a generated secret, not something a human
-    is expected to retype from memory -- folding case would throw away entropy."""
-    assert _join(client, "shouty@gmail.com", invite_code=TEST_INVITE_CODE.upper()).status_code == 403
-
-
-def test_a_wrong_invite_code_does_not_reveal_whether_an_email_is_registered(client, admin,
-                                                                            no_domain_restriction):
-    """The invite check runs BEFORE the email lookup. Otherwise the endpoint is
-    an account-enumeration oracle for anyone who hasn't got the code."""
-    taken = _join(client, "admin@qtechtest.io", invite_code="wrong-code")
-    fresh = _join(client, "nobody@qtechtest.io", invite_code="wrong-code")
-    assert taken.status_code == fresh.status_code == 403
-    assert taken.json()["detail"] == fresh.json()["detail"]
+def test_with_no_allowed_domains_joining_an_org_is_CLOSED(client, admin, no_domain_restriction):
+    """An empty allowlist must mean CLOSED, not 'no restriction'. Self-service
+    joining is off until an admin explicitly opens it to a domain -- otherwise
+    anyone who finds the URL and the org's join code gets straight in."""
+    r = _join(client, "randomer@gmail.com")
+    assert r.status_code == 403
+    assert "closed" in r.json()["detail"].lower()
 
 
 def test_an_outside_domain_cannot_join(client, admin, open_to_qtech):

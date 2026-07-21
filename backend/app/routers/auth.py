@@ -1,5 +1,3 @@
-import secrets
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -36,43 +34,12 @@ def _issue_token(user: User) -> Token:
     return Token(access_token=create_access_token(subject=user.email, role=user.role.value))
 
 
-def _require_invite_code(supplied: str) -> None:
-    """The gate on every registration path.
-
-    Two distinct refusals, deliberately worded differently: an unset INVITE_CODE
-    is the operator's problem to fix, while a wrong one is the visitor's. Telling
-    them apart costs nothing here -- neither message reveals the code, and a
-    visitor who can't register needs to know whether to re-check what they were
-    given or go ask an admin.
-    """
-    configured = settings.invite_code
-    if not configured:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Registration is closed. Ask an admin to add your account directly.",
-        )
-    # Constant-time: a plain != leaks the code one character at a time to
-    # anyone who can measure the response, and this endpoint is unauthenticated.
-    if not secrets.compare_digest(supplied.strip(), configured):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="That invite code isn't valid. Check the one you were given, or ask an admin.",
-        )
-
-
 @router.post("/signup/organization", response_model=Token, status_code=status.HTTP_201_CREATED)
 def signup_new_organization(payload: SignupNewOrganization, db: Session = Depends(get_db)):
     """Start a brand-new, empty workspace. No data, no other users — this
-    person becomes its admin.
-
-    Gated on INVITE_CODE. The workspace itself holds nothing worth protecting
-    at this instant, but creating one is still how a stranger gets a foothold
-    in the product, so it takes the same shared secret as every other path in.
+    person becomes its admin. Open to anyone; there's nothing to protect yet,
+    since the workspace doesn't exist until this call creates it.
     """
-    # Before the email lookup, not after: an ungated "Email already registered"
-    # answers "does this person have an account here?" for anyone who asks.
-    _require_invite_code(payload.invite_code)
-
     if crud.get_user_by_email(db, payload.email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -96,23 +63,25 @@ def signup_new_organization(payload: SignupNewOrganization, db: Session = Depend
 def signup_join_organization(payload: SignupJoinOrganization, db: Session = Depends(get_db)):
     """Join an organization someone else already created.
 
-    Three independent things are checked here: INVITE_CODE (proves you were
-    invited to the product at all), the org's join code (ties you to ONE
-    specific organization rather than the whole product), and optionally the
-    email-domain allowlist. Finding the org by name is not enough on its own.
+    This is the endpoint the old wide-open self-registration became: same
+    email-domain allowlist as before (ALLOWED_SIGNUP_DOMAINS), PLUS the join
+    code, which is the part that actually ties you to one specific
+    organization rather than the whole product. Finding the org by name is
+    not enough on its own -- the code has to match too.
     """
-    _require_invite_code(payload.invite_code)
-
     if crud.get_user_by_email(db, payload.email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Unlike the invite code, an empty allowlist here means "no domain
-    # restriction" rather than closed. That is only safe because the invite
-    # code above is mandatory and already failed the request shut when unset --
-    # this list narrows an already-gated door, it never is the door.
+    # An empty allowlist must mean CLOSED, not "no restriction" -- that's the
+    # whole point of the safe-default documented on Settings.ALLOWED_SIGNUP_DOMAINS.
     allowed_domains = settings.allowed_signup_domains
     domain = payload.email.split("@")[-1].lower()
-    if allowed_domains and domain not in allowed_domains:
+    if not allowed_domains:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sign up this way is currently closed. Ask an admin to add you directly instead.",
+        )
+    if domain not in allowed_domains:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Only {', '.join(allowed_domains)} addresses can sign up this way.",

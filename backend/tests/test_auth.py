@@ -1,5 +1,5 @@
 """Auth, roles, and the privilege-escalation hole closed in Slice 0."""
-from tests.conftest import auth, _register, TEST_ORG_NAME, TEST_ORG_JOIN_CODE, TEST_INVITE_CODE
+from tests.conftest import auth, _register, TEST_ORG_NAME, TEST_ORG_JOIN_CODE
 
 
 def _join_payload(client, **overrides):
@@ -10,7 +10,6 @@ def _join_payload(client, **overrides):
         "password": "password123",
         "organization_id": orgs[0]["id"],
         "join_code": TEST_ORG_JOIN_CODE,
-        "invite_code": TEST_INVITE_CODE,
     }
     payload.update(overrides)
     return payload

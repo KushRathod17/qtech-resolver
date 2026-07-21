@@ -72,20 +72,11 @@ services:
       - key: CORS_ORIGINS
         value: https://qtech-resolver-frontend.onrender.com
 
-      # The shared secret every registration must present, handed to the team
-      # out of band. Required on BOTH signup paths. Deliberately `sync: false`
-      # rather than a value here -- committing it would defeat the point, since
-      # this file is public. Set it in the Render dashboard.
-      #
-      # LEAVING THIS UNSET BLOCKS REGISTRATION ENTIRELY (by design -- an unset
-      # gate must never read as an open one). Existing users can still log in.
-      - key: INVITE_CODE
-        sync: false
-
-      # OPTIONAL extra restriction layered on top of INVITE_CODE, narrowing who
-      # may join an existing org by email domain (e.g. "qtechsoftware.com").
-      # Empty means no domain restriction -- safe only because INVITE_CODE
-      # above is mandatory and gates the door on its own.
+      # Who may JOIN this org via the self-service /auth/signup/join flow.
+      # Comma-separated email domains, e.g. "qtechsoftware.com". EMPTY MEANS
+      # CLOSED -- nobody can join this way until you set this. Add teammates
+      # directly from the People page in the meantime, or set this once you
+      # want self-service joining open to your own company domain.
       - key: ALLOWED_SIGNUP_DOMAINS
         value: ""
 
