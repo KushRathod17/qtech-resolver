@@ -27,7 +27,15 @@ function timeAgo(iso) {
  *
  * No websockets in this stack, so the unread count is POLLED — one indexed
  * COUNT every 30s, which is cheap by design. The full list is fetched only when
- * the panel is actually opened, not on every poll.
+ * the panel is actually opened, OR when the count just went UP (see poll
+ * below) so a real browser popup can say something more useful than "you
+ * have notifications."
+ *
+ * The popup uses the browser's own Notification API, not push -- it only
+ * fires while this tab is open somewhere (even backgrounded), not when the
+ * browser itself is closed. That's the trade-off for needing zero new
+ * backend infrastructure: no service worker, no subscription table, no
+ * per-device push endpoint.
  */
 export default function NotificationBell() {
   const navigate = useNavigate();
@@ -38,14 +46,57 @@ export default function NotificationBell() {
   const [error, setError] = useState("");
   const wrapRef = useRef(null);
 
+  // Tracks what the badge said last poll (null until the first poll actually
+  // lands) and which notification ids have already popped up a browser
+  // notification -- both needed so a fresh page load with 4 pre-existing
+  // unread items doesn't fire 4 popups, only genuinely NEW ones do.
+  const previousUnreadRef = useRef(null);
+  const notifiedIdsRef = useRef(new Set());
+
+  const popup = useCallback((n) => {
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    const browserNotif = new Notification(n.title, {
+      body: n.body || "",
+      icon: "/favicon.svg",
+      tag: n.id, // same id from another open tab collapses into one popup, not two
+    });
+    browserNotif.onclick = () => {
+      window.focus();
+      if (n.ticket) navigate(`/board?ticket=${n.ticket.id}`);
+      browserNotif.close();
+    };
+  }, [navigate]);
+
   const poll = useCallback(async () => {
     try {
-      setUnread(await notificationsApi.unreadCount());
+      const count = await notificationsApi.unreadCount();
+      const prev = previousUnreadRef.current;
+      setUnread(count);
+
+      if (prev !== null && count > prev && Notification?.permission === "granted") {
+        // Something new landed -- find out what, so the popup(s) can name it.
+        // One extra request, but only on the polls where the count actually
+        // moved, not every 30s.
+        try {
+          const list = await notificationsApi.list();
+          const fresh = list.filter((n) => !n.is_read && !notifiedIdsRef.current.has(n.id));
+          // Capped so reopening a tab after a long absence doesn't fire a
+          // popup storm -- the bell panel still shows everything either way.
+          for (const n of fresh.slice(0, 5)) {
+            popup(n);
+            notifiedIdsRef.current.add(n.id);
+          }
+        } catch {
+          // Badge count is still right even if this extra fetch fails --
+          // just no popup this cycle.
+        }
+      }
+      previousUnreadRef.current = count;
     } catch {
       // A transient failure shouldn't spam the console or the user — the next
       // tick will catch up.
     }
-  }, []);
+  }, [popup]);
 
   useEffect(() => {
     poll();
@@ -73,6 +124,15 @@ export default function NotificationBell() {
   async function openPanel() {
     const next = !open;
     setOpen(next);
+
+    // Ask once, right on a real click -- not on page load, where an
+    // unprompted permission dialog just trains people to reflexively
+    // dismiss it. "default" means they've never been asked (or reset it);
+    // "granted"/"denied" both mean there's nothing to ask.
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission().catch(() => {});
+    }
+
     if (!next) return;
 
     setLoading(true);
