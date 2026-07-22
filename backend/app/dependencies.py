@@ -46,6 +46,13 @@ def get_current_user(
     if user is None:
         raise credentials_exception
 
+    # Tokens are stateless (no revocation list), so a deactivation doesn't
+    # invalidate a token already issued -- it has to be caught here, on every
+    # authenticated request, or a removed person keeps working until their
+    # token naturally expires.
+    if not user.is_active:
+        raise credentials_exception
+
     # An account created by an admin has a password the ADMIN chose and knows.
     # Until the owner replaces it, it isn't really theirs — so the token is good
     # for nothing except fixing that.

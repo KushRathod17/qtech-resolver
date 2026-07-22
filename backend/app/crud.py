@@ -175,6 +175,55 @@ def update_user(db: Session, user: models.User, changes: schemas.UserUpdate) -> 
     return user
 
 
+def user_has_history(db: Session, user_id: uuid.UUID, organization_id: uuid.UUID) -> bool:
+    """Whether this person has ever done anything that a real DELETE would
+    either be blocked by (tickets.assignee_id/created_by_id, comments.author_id,
+    activity_log.actor_id are all non-cascading FKs to users.id, on purpose)
+    or silently lose. A brand-new dummy/test account has none of this."""
+    has_ticket = (
+        db.query(models.Ticket.id)
+        .filter(
+            models.Ticket.organization_id == organization_id,
+            or_(models.Ticket.assignee_id == user_id, models.Ticket.created_by_id == user_id),
+        )
+        .first()
+        is not None
+    )
+    if has_ticket:
+        return True
+    has_comment = (
+        db.query(models.Comment.id).filter(models.Comment.author_id == user_id).first() is not None
+    )
+    if has_comment:
+        return True
+    has_activity = (
+        db.query(models.ActivityLog.id).filter(models.ActivityLog.actor_id == user_id).first() is not None
+    )
+    return has_activity
+
+
+def hard_delete_user(db: Session, user: models.User) -> None:
+    """Only safe to call after user_has_history() came back False -- see
+    there for why. Notifications and watcher rows do cascade (they're not
+    meaningful history to preserve), so nothing extra needs cleaning up here."""
+    db.delete(user)
+    db.commit()
+
+
+def deactivate_user(db: Session, user: models.User) -> models.User:
+    user.is_active = False
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def reactivate_user(db: Session, user: models.User) -> models.User:
+    user.is_active = True
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def set_password(db: Session, user: models.User, new_password: str) -> models.User:
     user.hashed_password = hash_password(new_password)
     # Changing it is exactly what clears the flag — that's the whole gate.

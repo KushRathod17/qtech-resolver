@@ -124,7 +124,11 @@ def login(
     # OAuth2PasswordRequestForm expects fields named "username" and "password" —
     # we treat "username" as the user's email here
     user = crud.get_user_by_email(db, email)
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    # Same generic error for a wrong password, a nonexistent email, AND a
+    # deactivated account -- a distinct "this account was removed" message
+    # would tell an attacker (or a curious ex-employee) that the address was
+    # ever valid here at all.
+    if not user or not user.is_active or not verify_password(form_data.password, user.hashed_password):
         login_limiter.record_failure(ip_key)
         login_limiter.record_failure(email_key)
         raise HTTPException(

@@ -3050,6 +3050,21 @@ body { background: var(--color-bg); color: var(--color-text); }
   background: rgba(245, 166, 35, 0.1) !important;
 }
 
+.row-deactivated {
+  opacity: 0.55;
+}
+
+.row-deactivated td:first-child {
+  box-shadow: inset 3px 0 0 var(--text-tertiary, #6b7280);
+}
+
+.deactivated-pill {
+  margin-left: 8px;
+  border-color: var(--text-tertiary, #6b7280) !important;
+  color: var(--text-tertiary, #6b7280) !important;
+  background: rgba(107, 114, 128, 0.12) !important;
+}
+
 .unassigned-warning {
   margin: 0 0 16px;
   padding: 10px 14px;

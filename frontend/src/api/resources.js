@@ -163,6 +163,12 @@ export const usersApi = {
   setTeam: (id, teamId) =>
     apiClient.patch(`/users/${id}/team`, { team_id: teamId || null }).then((r) => r.data),
 
+  // Deletes cleanly if this person has zero tickets/comments/activity (e.g. a
+  // test account), otherwise deactivates them instead (can't log in, hidden
+  // from the assignee picker, history untouched). Response tells you which.
+  remove: (id) => apiClient.delete(`/users/${id}`).then((r) => r.data),
+  reactivate: (id) => apiClient.post(`/users/${id}/reactivate`).then((r) => r.data),
+
   // Admin/manager adds a colleague directly. The account can log in at once,
   // but must change the temp password before anything else works.
   create: (payload) => apiClient.post("/users/", payload).then((r) => r.data),

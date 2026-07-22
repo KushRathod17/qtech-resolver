@@ -705,9 +705,17 @@ export default function TicketModal({
               ) : (
                 <select id="t-assignee" value={form.assignee_id} onChange={set("assignee_id")}>
                   <option value="">Unassigned</option>
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>{u.full_name}</option>
-                  ))}
+                  {/* Deactivated people are hidden from NEW assignment, but if this
+                      ticket is already assigned to one (assigned before they were
+                      removed), keep that option so the field doesn't silently
+                      revert to Unassigned the moment the modal opens. */}
+                  {users
+                    .filter((u) => u.is_active !== false || u.id === form.assignee_id)
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.full_name}{u.is_active === false ? " (deactivated)" : ""}
+                      </option>
+                    ))}
                 </select>
               )}
             </div>

@@ -193,6 +193,14 @@ class User(Base):
     # gate would be theatre: the token works fine against curl.
     must_change_password = Column(Boolean, nullable=False, server_default="false")
 
+    # False means "removed" without actually deleting the row -- a real delete
+    # is blocked at the DB level for anyone who's ever created/been assigned a
+    # ticket or left a comment (those FKs aren't cascading, on purpose: losing
+    # a departed employee's ticket history would be worse than keeping a
+    # disabled row around). Deactivated accounts can't log in and are hidden
+    # from the assignee picker, but their name stays correct on old tickets.
+    is_active = Column(Boolean, nullable=False, server_default="true")
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     organization = relationship("Organization")

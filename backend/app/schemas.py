@@ -70,6 +70,7 @@ class UserOut(BaseModel):
     theme: str = "dark"
     team_id: Optional[uuid.UUID] = None
     must_change_password: bool = False
+    is_active: bool = True
 
 
 class UserCreateByAdmin(BaseModel):
@@ -107,6 +108,16 @@ class TeamMemberOut(UserOut):
 
 class UserRoleUpdate(BaseModel):
     role: UserRole
+
+
+class RemovePersonResult(BaseModel):
+    """DELETE /users/{id} does one of two things depending on whether there's
+    real history to protect -- this tells the caller which one happened.
+    'deleted': the row is gone, user is None.
+    'deactivated': the row survives with is_active=False; user carries the
+    updated record so the UI can show it as disabled rather than refetching."""
+    action: str  # "deleted" | "deactivated"
+    user: Optional[UserOut] = None
 
 
 class UserUpdate(BaseModel):

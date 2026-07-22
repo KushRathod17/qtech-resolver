@@ -78,6 +78,43 @@ export default function People() {
     }
   }
 
+  async function removePerson(user) {
+    const confirmed = window.confirm(
+      `Remove ${user.full_name}? If they have no tickets, comments, or activity, their ` +
+        `account is deleted outright. If they have history, they're deactivated instead — ` +
+        `can't log in, hidden from assignment, but their past work stays intact.`
+    );
+    if (!confirmed) return;
+
+    setBusyId(user.id);
+    setError("");
+    try {
+      const result = await usersApi.remove(user.id);
+      if (result.action === "deleted") {
+        setUsers((prev) => prev.filter((u) => u.id !== user.id));
+      } else {
+        setUsers((prev) => prev.map((u) => (u.id === user.id ? result.user : u)));
+      }
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't remove that person."));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function reactivatePerson(user) {
+    setBusyId(user.id);
+    setError("");
+    try {
+      const saved = await usersApi.reactivate(user.id);
+      setUsers((prev) => prev.map((u) => (u.id === saved.id ? saved : u)));
+    } catch (err) {
+      setError(errorMessage(err, "Couldn't reactivate that person."));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function changeRole(user, role) {
     const previous = users;
     setBusyId(user.id);
@@ -178,6 +215,7 @@ export default function People() {
                 <th scope="col">Team</th>
                 <th scope="col">Role</th>
                 <th scope="col">Workload</th>
+                {canManage && <th scope="col">Remove</th>}
                 <th scope="col" className="saved-col" aria-label="Save status" />
               </tr>
             </thead>
@@ -185,9 +223,16 @@ export default function People() {
               {visible.map((u) => {
                 const team = teamOf(u);
                 const busy = busyId === u.id;
+                const isSelf = u.id === me?.id;
 
                 return (
-                  <tr key={u.id} className={!u.team_id ? "row-unassigned" : ""}>
+                  <tr
+                    key={u.id}
+                    className={[
+                      !u.team_id ? "row-unassigned" : "",
+                      !u.is_active ? "row-deactivated" : "",
+                    ].filter(Boolean).join(" ")}
+                  >
                     <td>
                       {/* The name links to their profile — that's where the
                           full history and involvement breakdown lives. */}
@@ -195,7 +240,8 @@ export default function People() {
                         <span className="timeline-person">
                           <Avatar user={u} size={26} />
                           <strong>{u.full_name}</strong>
-                          {u.id === me?.id && <span className="you-tag">you</span>}
+                          {isSelf && <span className="you-tag">you</span>}
+                          {!u.is_active && <span className="state-pill deactivated-pill">Deactivated</span>}
                         </span>
                       </Link>
                     </td>
@@ -207,7 +253,7 @@ export default function People() {
                         <select
                           className={`people-select ${!u.team_id ? "needs-team" : ""}`}
                           value={u.team_id || ""}
-                          disabled={busy || teams.length === 0}
+                          disabled={busy || teams.length === 0 || !u.is_active}
                           onChange={(e) => changeTeam(u, e.target.value)}
                           aria-label={`Team for ${u.full_name}`}
                         >
@@ -233,7 +279,7 @@ export default function People() {
                         <select
                           className="people-select"
                           value={u.role}
-                          disabled={busy}
+                          disabled={busy || !u.is_active}
                           onChange={(e) => changeRole(u, e.target.value)}
                           aria-label={`Role for ${u.full_name}`}
                         >
@@ -249,6 +295,32 @@ export default function People() {
                     <td>
                       <WorkloadBadge band={u.band} openTickets={u.open_tickets ?? 0} />
                     </td>
+
+                    {canManage && (
+                      <td>
+                        {isSelf ? (
+                          <span className="field-hint">—</span>
+                        ) : !u.is_active ? (
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            disabled={busy}
+                            onClick={() => reactivatePerson(u)}
+                          >
+                            Reactivate
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-secondary btn-danger"
+                            disabled={busy}
+                            onClick={() => removePerson(u)}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </td>
+                    )}
 
                     <td className="saved-col">
                       {busy && <span className="saving-flash">Saving…</span>}
