@@ -104,16 +104,11 @@ had), so the browser never talks to Backblaze directly.
    - `S3_BUCKET_NAME` → `qtech-resolver-uploads`
    - `S3_REGION` → the region code from the endpoint (e.g. `us-west-004`)
 
-   `ALLOWED_SIGNUP_DOMAINS` ships set to `""` in `render.yaml`, which means
-   self-service joining (`/auth/signup/join`) is **closed by default** — on
-   purpose, so a fresh deploy never leaves the door open. Add teammates
-   directly from the People page in the meantime. If you want people at your
-   own company to be able to join themselves once they have the org's join
-   code, set `ALLOWED_SIGNUP_DOMAINS` to your email domain (e.g.
-   `qtechsoftware.com`) on the backend service's Environment tab and it
-   redeploys automatically. Starting a brand-new organization
-   (`/auth/signup/organization`) is never gated — there's nothing to protect
-   until that call creates the org.
+   Self-service joining (`/auth/signup/join`) is gated by the org's join code
+   alone — anyone you share the code with can join, on any email address.
+   Rotate the join code from the organization's Settings page if it ever
+   leaks. Starting a brand-new organization (`/auth/signup/organization`) is
+   never gated — there's nothing to protect until that call creates the org.
 4. Click **Apply**. Render builds both services. The backend's
    `preDeployCommand` runs `alembic upgrade head` automatically before each
    deploy, so the database schema is created on this first deploy too — you

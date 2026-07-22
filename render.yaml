@@ -72,14 +72,6 @@ services:
       - key: CORS_ORIGINS
         value: https://qtech-resolver-frontend.onrender.com
 
-      # Who may JOIN this org via the self-service /auth/signup/join flow.
-      # Comma-separated email domains, e.g. "qtechsoftware.com". EMPTY MEANS
-      # CLOSED -- nobody can join this way until you set this. Add teammates
-      # directly from the People page in the meantime, or set this once you
-      # want self-service joining open to your own company domain.
-      - key: ALLOWED_SIGNUP_DOMAINS
-        value: ""
-
       - key: LOGIN_MAX_ATTEMPTS
         value: "8"
       - key: LOGIN_LOCKOUT_SECONDS

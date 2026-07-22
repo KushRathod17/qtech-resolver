@@ -24,20 +24,6 @@ def _clean_limiter():
     login_limiter.clear()
 
 
-@pytest.fixture()
-def open_to_qtech(monkeypatch):
-    monkeypatch.setattr(settings, "ALLOWED_SIGNUP_DOMAINS", "qtechsoftware.com")
-    yield
-
-
-@pytest.fixture()
-def no_domain_restriction(monkeypatch):
-    """No domain allowlist configured. This must mean joining is CLOSED, not
-    open -- that's the safe default documented on Settings.ALLOWED_SIGNUP_DOMAINS."""
-    monkeypatch.setattr(settings, "ALLOWED_SIGNUP_DOMAINS", "")
-    yield
-
-
 def _join(client, email, password="password123", join_code=TEST_ORG_JOIN_CODE):
     """Same two-step flow a real signup uses: find the org by name, then the
     join code is what actually gets you in."""
@@ -77,50 +63,25 @@ def test_creating_a_new_organization_has_no_gate(client):
     assert _role_of(client, r.json()["access_token"]) == "admin"
 
 
-def test_with_no_allowed_domains_joining_an_org_is_CLOSED(client, admin, no_domain_restriction):
-    """An empty allowlist must mean CLOSED, not 'no restriction'. Self-service
-    joining is off until an admin explicitly opens it to a domain -- otherwise
-    anyone who finds the URL and the org's join code gets straight in."""
+def test_anyone_with_the_correct_join_code_can_join(client, admin):
+    """The join code IS the gate -- there's no separate email-domain
+    allowlist. A personal address is fine as long as the code matches."""
     r = _join(client, "randomer@gmail.com")
-    assert r.status_code == 403
-    assert "closed" in r.json()["detail"].lower()
-
-
-def test_an_outside_domain_cannot_join(client, admin, open_to_qtech):
-    r = _join(client, "attacker@evil.example")
-    assert r.status_code == 403
-    # Says which domains ARE allowed: it isn't a secret, and a vague error just
-    # creates a support ticket for the thing meant to be self-service.
-    assert "qtechsoftware.com" in r.json()["detail"]
-
-
-def test_an_allowed_domain_can_join(client, admin, open_to_qtech):
-    r = _join(client, "newhire@qtechsoftware.com")
     assert r.status_code == 201
     assert _role_of(client, r.json()["access_token"]) == "developer"   # never an admin, admin already exists
 
 
-def test_the_domain_check_is_case_insensitive(client, admin, open_to_qtech):
-    assert _join(client, "Shouty@QTechSoftware.COM").status_code == 201
-
-
-def test_a_lookalike_domain_is_rejected(client, admin, open_to_qtech):
-    """`evil-qtechsoftware.com` and `qtechsoftware.com.evil.io` must not pass."""
-    assert _join(client, "a@evil-qtechsoftware.com").status_code == 403
-    assert _join(client, "b@qtechsoftware.com.evil.io").status_code == 403
-
-
-def test_a_wrong_join_code_is_rejected(client, admin, open_to_qtech):
+def test_a_wrong_join_code_is_rejected(client, admin):
     """Finding the org by name is not enough on its own — the code has to
     match too. Same error as a nonexistent org, so the response can't be used
     to enumerate which organizations are real."""
-    r = _join(client, "someone@qtechsoftware.com", join_code="TOTALLY-WRONG")
+    r = _join(client, "someone@gmail.com", join_code="TOTALLY-WRONG")
     assert r.status_code == 400
 
 
-def test_admins_can_still_add_anyone_regardless_of_domain(client, admin, open_to_qtech):
-    """The domain gate is for SELF-registration. A deliberate admin decision to
-    add a contractor on gmail is still allowed."""
+def test_admins_can_still_add_anyone_directly(client, admin):
+    """Beyond self-service joining, an admin can also add someone directly
+    (no join code needed at all)."""
     r = client.post(
         "/users/",
         json={

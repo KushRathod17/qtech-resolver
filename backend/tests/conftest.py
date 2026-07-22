@@ -22,18 +22,6 @@ TEST_DB = "qtech_resolver_test"
 TEST_URL = settings.DATABASE_URL.rsplit("/", 1)[0] + f"/{TEST_DB}"
 
 
-@pytest.fixture(autouse=True)
-def _test_signup_domain(monkeypatch):
-    """Tests must not depend on the developer's .env.
-
-    Real deployments gate registration with ALLOWED_SIGNUP_DOMAINS, which
-    would otherwise block the fixtures that register @qtechtest.io users.
-    Tests that specifically exercise that gate override this.
-    """
-    monkeypatch.setattr(settings, "ALLOWED_SIGNUP_DOMAINS", "qtechtest.io")
-    yield
-
-
 @pytest.fixture(scope="session", autouse=True)
 def _create_test_database():
     """CREATE DATABASE can't run inside a transaction, hence AUTOCOMMIT."""

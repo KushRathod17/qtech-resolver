@@ -63,29 +63,15 @@ def signup_new_organization(payload: SignupNewOrganization, db: Session = Depend
 def signup_join_organization(payload: SignupJoinOrganization, db: Session = Depends(get_db)):
     """Join an organization someone else already created.
 
-    This is the endpoint the old wide-open self-registration became: same
-    email-domain allowlist as before (ALLOWED_SIGNUP_DOMAINS), PLUS the join
-    code, which is the part that actually ties you to one specific
-    organization rather than the whole product. Finding the org by name is
-    not enough on its own -- the code has to match too.
+    This is the endpoint the old wide-open self-registration became: the join
+    code is what actually ties you to one specific organization rather than
+    the whole product. Finding the org by name is not enough on its own --
+    the code has to match too. That code IS the gate; there is no additional
+    email-domain restriction, so anyone the org shares its join code with
+    (including contractors or clients on a personal email) can join.
     """
     if crud.get_user_by_email(db, payload.email):
         raise HTTPException(status_code=400, detail="Email already registered")
-
-    # An empty allowlist must mean CLOSED, not "no restriction" -- that's the
-    # whole point of the safe-default documented on Settings.ALLOWED_SIGNUP_DOMAINS.
-    allowed_domains = settings.allowed_signup_domains
-    domain = payload.email.split("@")[-1].lower()
-    if not allowed_domains:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Sign up this way is currently closed. Ask an admin to add you directly instead.",
-        )
-    if domain not in allowed_domains:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Only {', '.join(allowed_domains)} addresses can sign up this way.",
-        )
 
     org = crud.get_organization(db, payload.organization_id)
     # Same error either way -- a wrong code and a nonexistent org must look
