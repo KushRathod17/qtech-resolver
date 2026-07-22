@@ -102,7 +102,7 @@ def build_ticket_pdf(*, ticket, comments: list, activity: list, handoffs: list) 
     story.append(Paragraph(
         f"{_label(TYPE_LABELS, ticket.ticket_type)} · {_label(PRIORITY_LABELS, ticket.priority)} priority · "
         f"{_label(STATUS_LABELS, ticket.status)}"
-        + (f" · {ticket.story_points} pts" if ticket.story_points is not None else ""),
+        + (f" · {ticket.estimated_hours}h estimated" if ticket.estimated_hours is not None else ""),
         meta_style,
     ))
 

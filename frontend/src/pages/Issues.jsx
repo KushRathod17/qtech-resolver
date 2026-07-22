@@ -5,7 +5,6 @@ import {
   ticketsApi,
   labelsApi,
   usersApi,
-  sprintsApi,
   filtersApi,
   teamsApi,
   errorMessage,
@@ -98,9 +97,9 @@ const COLUMN_DEFS = [
   },
   {
     key: "points",
-    label: "Points",
-    sort: (a, b) => (a.story_points ?? -1) - (b.story_points ?? -1),
-    render: (t) => t.story_points ?? <span className="empty-cell">—</span>,
+    label: "Hours",
+    sort: (a, b) => (a.estimated_hours ?? -1) - (b.estimated_hours ?? -1),
+    render: (t) => (t.estimated_hours != null ? `${t.estimated_hours}h` : <span className="empty-cell">—</span>),
   },
   {
     key: "created",
@@ -117,7 +116,6 @@ export default function Issues() {
   const [tickets, setTickets] = useState([]);
   const [users, setUsers] = useState([]);
   const [labels, setLabels] = useState([]);
-  const [sprints, setSprints] = useState([]);
   const [teams, setTeams] = useState([]);
   const [savedFilters, setSavedFilters] = useState([]);
 
@@ -166,11 +164,10 @@ export default function Issues() {
   }, [loadTickets]);
 
   useEffect(() => {
-    Promise.all([usersApi.list(), labelsApi.list(), sprintsApi.list(), teamsApi.list(), filtersApi.list()])
-      .then(([u, l, s, tm, sf]) => {
+    Promise.all([usersApi.list(), labelsApi.list(), teamsApi.list(), filtersApi.list()])
+      .then(([u, l, tm, sf]) => {
         setUsers(u);
         setLabels(l);
-        setSprints(s);
         setTeams(tm);
         setSavedFilters(sf);
       })
@@ -368,7 +365,6 @@ export default function Issues() {
           count={selectedIds.size}
           users={users}
           labels={labels}
-          sprints={sprints}
           busy={bulkBusy}
           onApply={handleBulkApply}
           onDelete={handleBulkDelete}

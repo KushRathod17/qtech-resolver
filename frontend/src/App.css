@@ -2698,6 +2698,30 @@ body { background: var(--color-bg); color: var(--color-text); }
 
 .composer .field-hint { margin-top: 6px; }
 
+/* A button styled as a plain text link -- for a low-emphasis "do a thing"
+   affordance next to a field, like "+ New parent tag", that shouldn't compete
+   visually with the field above it. */
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-link:hover { text-decoration: underline; }
+
+.inline-create-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.inline-create-row input {
+  flex: 1;
+  min-width: 0;
+}
 
 /* ==========================================================================
    Bookings
@@ -2734,6 +2758,10 @@ body { background: var(--color-bg); color: var(--color-text); }
   border: 1px solid var(--color-accent);
   color: var(--color-text);
   font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 /* ==========================================================================

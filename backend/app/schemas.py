@@ -5,7 +5,7 @@ from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 from .models import (
-    UserRole, TicketStatus, TicketPriority, TicketType, TaskCategory, SprintState,
+    UserRole, TicketStatus, TicketPriority, TicketType, SprintState,
     TeamKind, HandoffAction, EnvironmentStage,
 )
 
@@ -127,7 +127,7 @@ class UserStats(BaseModel):
     in_progress: int   # in_progress + code_review
     done: int
     total: int
-    story_points_open: int
+    estimated_hours_open: float
 
 
 class UserProfileOut(BaseModel):
@@ -492,9 +492,12 @@ class TicketCreate(BaseModel):
     status: TicketStatus = TicketStatus.TODO
     priority: TicketPriority = TicketPriority.MEDIUM
     ticket_type: TicketType = TicketType.TASK
-    # Only meaningful when ticket_type == TASK (the UI hides it for Bug).
-    task_category: Optional[TaskCategory] = None
-    story_points: Optional[int] = Field(default=None, ge=0, le=100)
+    # Only meaningful when ticket_type == TASK (the UI hides it for Bug). Free
+    # text, not a DB enum -- same reasoning as `product` below: the fixed list
+    # the UI offers can change with just a frontend deploy.
+    task_category: Optional[str] = Field(default=None, max_length=40)
+    # How much time this is expected to take, in hours (e.g. 2.5).
+    estimated_hours: Optional[float] = Field(default=None, ge=0, le=1000)
     product: Optional[str] = Field(default=None, max_length=60)
     assignee_id: Optional[uuid.UUID] = None
     sprint_id: Optional[uuid.UUID] = None
@@ -531,8 +534,8 @@ class TicketUpdate(BaseModel):
     status: Optional[TicketStatus] = None
     priority: Optional[TicketPriority] = None
     ticket_type: Optional[TicketType] = None
-    task_category: Optional[TaskCategory] = None
-    story_points: Optional[int] = Field(default=None, ge=0, le=100)
+    task_category: Optional[str] = Field(default=None, max_length=40)
+    estimated_hours: Optional[float] = Field(default=None, ge=0, le=1000)
     product: Optional[str] = Field(default=None, max_length=60)
     assignee_id: Optional[uuid.UUID] = None
     sprint_id: Optional[uuid.UUID] = None
@@ -573,7 +576,7 @@ class TicketBulkUpdate(BaseModel):
     status: Optional[TicketStatus] = None
     priority: Optional[TicketPriority] = None
     ticket_type: Optional[TicketType] = None
-    story_points: Optional[int] = Field(default=None, ge=0, le=100)
+    estimated_hours: Optional[float] = Field(default=None, ge=0, le=1000)
     # Explicit null clears the field, so these need to distinguish
     # "not supplied" from "set to nothing".
     assignee_id: Optional[uuid.UUID] = None
@@ -656,8 +659,8 @@ class TicketOut(BaseModel):
     status: TicketStatus
     priority: TicketPriority
     ticket_type: TicketType
-    task_category: Optional[TaskCategory]
-    story_points: Optional[int]
+    task_category: Optional[str]
+    estimated_hours: Optional[float]
     product: Optional[str]
     start_date: Optional[date]
     due_date: Optional[datetime]

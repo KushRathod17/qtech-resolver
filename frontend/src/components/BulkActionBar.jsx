@@ -12,7 +12,6 @@ export default function BulkActionBar({
   count,
   users,
   labels,
-  sprints,
   onApply,
   onDelete,
   onClear,
@@ -69,20 +68,6 @@ export default function BulkActionBar({
         <option value="">Product…</option>
         {PRODUCTS.map((p) => (
           <option key={p} value={p}>{p}</option>
-        ))}
-      </select>
-
-      <select
-        className="filter-select"
-        defaultValue=""
-        disabled={busy}
-        onChange={fire((v) => (v === "__none" ? { clear_sprint: true } : { sprint_id: v }))}
-        aria-label="Move to sprint"
-      >
-        <option value="">Sprint…</option>
-        <option value="__none">Remove from sprint</option>
-        {sprints.map((s) => (
-          <option key={s.id} value={s.id}>{s.name}</option>
         ))}
       </select>
 

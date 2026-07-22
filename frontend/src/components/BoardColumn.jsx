@@ -11,14 +11,14 @@ export default function BoardColumn({ column, tickets, onOpen, onSelect, selecte
     data: { type: "column", status: column.key },
   });
 
-  const points = tickets.reduce((sum, t) => sum + (t.story_points || 0), 0);
+  const hours = tickets.reduce((sum, t) => sum + (t.estimated_hours || 0), 0);
 
   return (
     <div className={`column ${isOver ? "column-over" : ""}`}>
       <div className="column-header">
         <h4>{column.label}</h4>
         <div className="column-header-right">
-          {points > 0 && <span className="points-badge subtle" title="Story points in this column">{points}</span>}
+          {hours > 0 && <span className="points-badge subtle" title="Estimated hours in this column">{hours}h</span>}
           <span className="count-badge">{tickets.length}</span>
         </div>
       </div>

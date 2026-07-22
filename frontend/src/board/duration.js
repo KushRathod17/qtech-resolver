@@ -19,7 +19,10 @@ export const formatDateTime = (iso) =>
 /** Human labels for the workflow actions the API returns. */
 export const ACTION_LABELS = {
   raised: "Raised",
-  forwarded: "Confirmed bug → Development",
+  // Generic on purpose -- this same action fires for a Task ("Approve") and a
+  // Bug ("Confirm bug"), and the timeline has no ticket-type context to pick
+  // between them.
+  forwarded: "Confirmed → Development",
   returned_not_reproducible: "Not reproducible → Support",
   fixed_returned_to_testing: "Fixed → Testing",
   verified_returned_to_reporter: "Verified → Support",

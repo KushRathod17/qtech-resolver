@@ -64,13 +64,18 @@ ACTIVE_TICKET_TYPES = (TicketType.TASK, TicketType.BUG)
 
 class TaskCategory(str, enum.Enum):
     """Sub-classification of a Task — the dimension that replaced Story/Epic.
-    Only meaningful when ticket_type == TASK."""
+    Only meaningful when ticket_type == TASK.
+
+    Stored as a plain string column (see Ticket.task_category below), not a
+    Postgres enum -- this list has already changed once, and a free-text
+    column means the next change is an app deploy, not an ALTER TYPE against
+    production data. An old ticket carrying a category no longer in this list
+    just renders as "not set" in the picker; it isn't corrupted or lost."""
+    MANUAL = "manual"
+    TASK = "task"
+    ISSUE = "issue"
+    CHANGE_REQUEST = "change_request"
     NEW_DEVELOPMENT = "new_development"
-    ENHANCEMENT = "enhancement"
-    MAINTENANCE = "maintenance"
-    DOCUMENTATION = "documentation"
-    INVESTIGATION = "investigation"
-    CONFIGURATION = "configuration"
 
 
 class EnvironmentStage(str, enum.Enum):
@@ -358,9 +363,13 @@ class Ticket(Base):
     status = Column(SAEnum(TicketStatus), nullable=False, default=TicketStatus.TODO, index=True)
     priority = Column(SAEnum(TicketPriority), nullable=False, default=TicketPriority.MEDIUM)
     ticket_type = Column(SAEnum(TicketType), nullable=False, default=TicketType.TASK)
-    # Sub-classification, only meaningful when ticket_type == TASK.
-    task_category = Column(SAEnum(TaskCategory), nullable=True)
-    story_points = Column(Integer, nullable=True)
+    # Sub-classification, only meaningful when ticket_type == TASK. A plain
+    # string, not a Postgres enum -- see the note on TaskCategory above.
+    task_category = Column(String, nullable=True)
+    # How much time this is expected to take, in hours (e.g. 2.5). Replaced
+    # the old integer "story points" field -- this team estimates in hours,
+    # not an abstract point scale.
+    estimated_hours = Column(Float, nullable=True)
 
     # Which product this concerns — migrated from the old Components feature.
     # Kept as a plain string (the component's name) rather than an FK: the set is

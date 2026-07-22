@@ -258,9 +258,9 @@ def user_stats(db: Session, user_id: uuid.UUID, organization_id: uuid.UUID) -> d
         "in_progress": count(WIP_STATUSES),
         "done": count((models.TicketStatus.DONE,)),
         "total": len(tickets),
-        # The honest measure of load: points still on their plate, not ticket count.
-        "story_points_open": sum(
-            t.story_points or 0
+        # The honest measure of load: hours still on their plate, not ticket count.
+        "estimated_hours_open": sum(
+            t.estimated_hours or 0
             for t in tickets
             if t.status in OPEN_STATUSES + WIP_STATUSES
         ),
@@ -418,8 +418,12 @@ def sprint_stats(db: Session, sprint: models.Sprint) -> dict:
     tickets = get_tickets(db, sprint.organization_id, sprint_id=sprint.id)
     done = [t for t in tickets if t.status == models.TicketStatus.DONE]
     return {
-        "total_points": sum(t.story_points or 0 for t in tickets),
-        "completed_points": sum(t.story_points or 0 for t in done),
+        # Key names kept as "points" -- Sprints/Burndown/Velocity are legacy,
+        # hidden-from-nav surfaces (see Sprints.jsx); not worth threading a
+        # rename through a feature nobody is meant to be using day to day.
+        # The underlying number is hours now, same as everywhere else.
+        "total_points": sum(t.estimated_hours or 0 for t in tickets),
+        "completed_points": sum(t.estimated_hours or 0 for t in done),
         "total_tickets": len(tickets),
         "completed_tickets": len(done),
     }
@@ -427,7 +431,7 @@ def sprint_stats(db: Session, sprint: models.Sprint) -> dict:
 
 def sprint_burndown(db: Session, sprint: models.Sprint) -> dict:
     tickets = get_tickets(db, sprint.organization_id, sprint_id=sprint.id)
-    total = sum(t.story_points or 0 for t in tickets)
+    total = sum(t.estimated_hours or 0 for t in tickets)
 
     start = sprint.start_date or (sprint.created_at.date() if sprint.created_at else date.today())
     end = sprint.end_date or start
@@ -439,7 +443,7 @@ def sprint_burndown(db: Session, sprint: models.Sprint) -> dict:
     for ticket in tickets:
         if ticket.id in done_at:
             points_done_on.setdefault(done_at[ticket.id], 0)
-            points_done_on[done_at[ticket.id]] += ticket.story_points or 0
+            points_done_on[done_at[ticket.id]] += ticket.estimated_hours or 0
 
     span = (end - start).days
     today = date.today()
@@ -573,8 +577,11 @@ def report_overview(db: Session, organization_id: uuid.UUID, **filters) -> dict:
     return {
         "total_tickets": len(tickets),
         "by_status": by_status,
-        "total_points": sum(t.story_points or 0 for t in tickets),
-        "completed_points": sum(t.story_points or 0 for t in done),
+        # Key names kept as "points" for backward compatibility with the
+        # Reports page; the number itself is hours, same as everywhere else
+        # this used to be story points.
+        "total_points": sum(t.estimated_hours or 0 for t in tickets),
+        "completed_points": sum(t.estimated_hours or 0 for t in done),
     }
 
 
@@ -642,7 +649,7 @@ def report_by_employee(db: Session, organization_id: uuid.UUID, **filters) -> li
             "assigned_count": len(assigned),
             "done_count": len(done),
             "in_progress_count": len(in_progress),
-            "points_completed": sum(t.story_points or 0 for t in done),
+            "points_completed": sum(t.estimated_hours or 0 for t in done),
         })
     rows.sort(key=lambda r: r["assigned_count"], reverse=True)
     return rows
@@ -662,7 +669,7 @@ def report_by_label(db: Session, organization_id: uuid.UUID, **filters) -> list[
             "label": label,
             "total_count": len(tagged),
             "done_count": len(done),
-            "points_total": sum(t.story_points or 0 for t in tagged),
+            "points_total": sum(t.estimated_hours or 0 for t in tagged),
         })
     rows.sort(key=lambda r: r["total_count"], reverse=True)
     return rows
@@ -679,8 +686,8 @@ def velocity(db: Session, organization_id: uuid.UUID) -> dict:
             "sprint_id": sprint.id,
             "sprint_name": sprint.name,
             "state": sprint.state,
-            "committed_points": sum(t.story_points or 0 for t in tickets),
-            "completed_points": sum(t.story_points or 0 for t in done),
+            "committed_points": sum(t.estimated_hours or 0 for t in tickets),
+            "completed_points": sum(t.estimated_hours or 0 for t in done),
         })
 
     # Average only over finished sprints — an in-flight sprint would drag the
@@ -1598,6 +1605,19 @@ def create_ticket(
     db.add(db_ticket)
     db.flush()  # assigns id so the log can reference it
     log_activity(db, db_ticket.id, created_by_id, "created", f"Created {db_ticket.key}")
+
+    # Assigning someone directly at creation (picking them in the form, not
+    # routing through the workflow below) is still an assignment -- it should
+    # still tell them. Without this, a ticket handed straight to someone via
+    # the Assignee dropdown notified nobody; only a later edit or a workflow
+    # handoff did. Skipped when route_to_user_id is set: raise_into_workflow
+    # sends its own, more specific notification for that path.
+    if db_ticket.assignee_id and db_ticket.assignee_id != created_by_id and not ticket_in.route_to_user_id:
+        creator = get_user(db, created_by_id, organization_id)
+        _notify(db, db_ticket.assignee_id, created_by_id, "assigned",
+                f"{creator.full_name if creator else 'Someone'} assigned you {db_ticket.key}",
+                db_ticket, body=db_ticket.title)
+
     db.commit()
     db.refresh(db_ticket)
     attach_sla(db, [db_ticket])
@@ -1614,7 +1634,7 @@ TRACKED_FIELDS = {
     "priority": "priority",
     "ticket_type": "type",
     "task_category": "category",
-    "story_points": "story points",
+    "estimated_hours": "estimated hours",
     "assignee_id": "assignee",
     "sprint_id": "sprint",
     "parent_tag_id": "parent tag",
@@ -1803,7 +1823,7 @@ def create_subtask(
 # history — a duplicate is a NEW report of the same problem, not a clone of how
 # far the original got.
 DUPLICATE_FIELDS = (
-    "title", "description", "priority", "ticket_type", "task_category", "story_points",
+    "title", "description", "priority", "ticket_type", "task_category", "estimated_hours",
     "assignee_id", "sprint_id", "parent_tag_id", "product", "client_name",
     "start_date", "due_date",
 )
@@ -1873,10 +1893,10 @@ def bulk_update_tickets(
         if bulk.ticket_type and bulk.ticket_type != ticket.ticket_type:
             ticket.ticket_type = bulk.ticket_type
 
-        if bulk.story_points is not None and bulk.story_points != ticket.story_points:
+        if bulk.estimated_hours is not None and bulk.estimated_hours != ticket.estimated_hours:
             log_activity(db, ticket.id, actor_id, "estimated",
-                         f"{ticket.story_points or '-'} -> {bulk.story_points} points")
-            ticket.story_points = bulk.story_points
+                         f"{ticket.estimated_hours if ticket.estimated_hours is not None else '-'} -> {bulk.estimated_hours}h")
+            ticket.estimated_hours = bulk.estimated_hours
 
         if bulk.clear_assignee:
             if ticket.assignee_id is not None:

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 import {
   ticketsApi,
@@ -35,6 +35,7 @@ import {
 } from "../board/constants";
 
 const MAX_ATTACHMENT_MB = 10;
+const TICKET_POLL_MS = 20_000;
 
 function humanSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -49,7 +50,7 @@ const BLANK = {
   priority: "medium",
   ticket_type: "task",
   task_category: "",
-  story_points: "",
+  estimated_hours: "",
   assignee_id: "",
   product: "",
   parent_tag_id: "",
@@ -75,7 +76,7 @@ function ticketToForm(t) {
     priority: t.priority,
     ticket_type: t.ticket_type,
     task_category: t.task_category || "",
-    story_points: t.story_points ?? "",
+    estimated_hours: t.estimated_hours ?? "",
     assignee_id: t.assignee?.id || "",
     product: t.product || "",
     parent_tag_id: t.parent_tag?.id || "",
@@ -103,13 +104,25 @@ export default function TicketModal({
   onCreated,
   onDeleted,
   onLabelCreated,
+  onParentTagCreated,
   onOpenTicket,
 }) {
   const isNew = !ticket;
   const { user } = useAuth();
   const canDelete = user?.role === "admin" || user?.role === "manager";
+  // Same role the backend enforces on POST /parent-tags/ -- showing the
+  // control to someone who'd just get a 403 is worse than not showing it.
+  const canCreateParentTag = user?.role === "admin" || user?.role === "manager";
 
   const [form, setForm] = useState(isNew ? BLANK : ticketToForm(ticket));
+  // The poll below runs on a timer set up once per ticket, so it can't just
+  // close over `form` -- that would freeze it at whatever `form` was when the
+  // ticket opened, and every keystroke after that would look "not dirty"
+  // (falsely safe to overwrite). A ref always reads the CURRENT form instead.
+  const formRef = useRef(form);
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
 
   // A handoff replaces the ticket underneath us. Without this, the panel keeps
   // rendering the state it opened with — the workflow strip never updates, it
@@ -118,6 +131,42 @@ export default function TicketModal({
   useEffect(() => {
     if (!isNew && ticket) setForm(ticketToForm(ticket));
   }, [isNew, ticket]);
+
+  // Live sync while this panel is open: no websockets in this stack, so a
+  // teammate's edit shows up on the next poll rather than instantly. Never
+  // clobbers unsaved typing here — if the form differs from what's on the
+  // server, the fresher copy is just flagged via a banner instead of applied.
+  const [remoteUpdate, setRemoteUpdate] = useState(null);
+
+  useEffect(() => {
+    setRemoteUpdate(null); // a new ticket opened -- any old flag is stale
+    if (isNew) return undefined;
+
+    const poll = async () => {
+      try {
+        const fresh = await ticketsApi.get(ticket.id);
+        if (fresh.updated_at === ticket.updated_at) return; // nothing changed
+        const dirty = JSON.stringify(formRef.current) !== JSON.stringify(ticketToForm(ticket));
+        if (dirty) setRemoteUpdate(fresh);
+        else onSaved(fresh); // safe to adopt silently -- nothing unsaved to lose
+      } catch {
+        // transient failure -- the next tick catches up
+      }
+    };
+
+    const id = setInterval(poll, TICKET_POLL_MS);
+    window.addEventListener("focus", poll);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", poll);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, ticket?.id]);
+
+  function acceptRemoteUpdate() {
+    if (remoteUpdate) onSaved(remoteUpdate);
+    setRemoteUpdate(null);
+  }
 
   // In the workflow, status and assignee belong to the handoff chain, not to
   // this form. Two writers on one field, and the loser is the chain of custody.
@@ -232,6 +281,32 @@ export default function TicketModal({
       .finally(() => setSiblingLoading(false));
   }, [form.parent_tag_id, isNew, ticket?.id]);
 
+  // Creating a brand-new abstract parent tag without leaving this form --
+  // previously the only way to group under something that ISN'T an existing
+  // ticket was to go make one first on the Parent Tags page, then come back.
+  const [newTagOpen, setNewTagOpen] = useState(false);
+  const [newTagName, setNewTagName] = useState("");
+  const [newTagSaving, setNewTagSaving] = useState(false);
+  const [newTagError, setNewTagError] = useState("");
+
+  async function createParentTagInline() {
+    const name = newTagName.trim();
+    if (!name) return;
+    setNewTagSaving(true);
+    setNewTagError("");
+    try {
+      const created = await parentTagsApi.create({ name });
+      onParentTagCreated?.(created);
+      setForm((f) => ({ ...f, parent_tag_id: created.id }));
+      setNewTagOpen(false);
+      setNewTagName("");
+    } catch (err) {
+      setNewTagError(errorMessage(err, "Couldn't create that parent tag."));
+    } finally {
+      setNewTagSaving(false);
+    }
+  }
+
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
   const loadThread = useCallback(async () => {
@@ -285,7 +360,7 @@ export default function TicketModal({
       // Task Category only means something on a Task; sending it on a Bug
       // would just be confusing data nobody asked for.
       task_category: form.ticket_type === "task" && form.task_category ? form.task_category : null,
-      story_points: form.story_points === "" ? null : Number(form.story_points),
+      estimated_hours: form.estimated_hours === "" ? null : Number(form.estimated_hours),
       product: form.product || null,
       parent_tag_id: linkingTicket ? null : (form.parent_tag_id || null),
       parent_ticket_id: linkingTicket ? form.parent_tag_id : null,
@@ -454,6 +529,15 @@ export default function TicketModal({
           </div>
         </header>
 
+        {remoteUpdate && (
+          <div className="banner-info" role="status" style={{ margin: "0 20px 12px" }}>
+            <span>Someone else just updated this ticket. Your unsaved changes here haven't been touched.</span>
+            <button type="button" className="btn-secondary" onClick={acceptRemoteUpdate}>
+              Show the latest
+            </button>
+          </div>
+        )}
+
         <div className="panel-body">
           {/* --- Cross-team workflow: who has it, and what may I do ---
               Shown once this ticket has EITHER already entered the workflow
@@ -596,14 +680,15 @@ export default function TicketModal({
               </select>
             </div>
             <div className="field">
-              <label htmlFor="t-points">Story points</label>
+              <label htmlFor="t-points">Estimated time (hours)</label>
               <input
                 id="t-points"
                 type="number"
                 min="0"
-                max="100"
-                value={form.story_points}
-                onChange={set("story_points")}
+                max="1000"
+                step="0.5"
+                value={form.estimated_hours}
+                onChange={set("estimated_hours")}
                 placeholder="—"
               />
             </div>
@@ -816,6 +901,58 @@ export default function TicketModal({
                 </optgroup>
               )}
             </select>
+
+            {/* No existing tag fits — make one right here instead of leaving
+                the form to visit the Parent Tags page first. */}
+            {canCreateParentTag && (
+              newTagOpen ? (
+                <div className="inline-create-row">
+                  <input
+                    type="text"
+                    value={newTagName}
+                    onChange={(e) => setNewTagName(e.target.value)}
+                    placeholder="New parent tag name…"
+                    maxLength={60}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        createParentTagInline();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    disabled={newTagSaving || !newTagName.trim()}
+                    onClick={createParentTagInline}
+                  >
+                    {newTagSaving ? "Creating…" : "Create"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={() => {
+                      setNewTagOpen(false);
+                      setNewTagName("");
+                      setNewTagError("");
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-link"
+                  onClick={() => setNewTagOpen(true)}
+                  style={{ marginTop: 6 }}
+                >
+                  + New parent tag
+                </button>
+              )
+            )}
+            {newTagError && <p className="error-text" role="alert">{newTagError}</p>}
 
             {/* What's already grouped under whatever's picked above, right
                 here as you pick it — no need to save and reopen it to find out. */}

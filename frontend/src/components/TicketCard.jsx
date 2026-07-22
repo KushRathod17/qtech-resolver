@@ -77,9 +77,9 @@ export function TicketCardBody({ ticket, dragging = false, selected = false }) {
         </div>
 
         <div className="ticket-meta-right">
-          {ticket.story_points != null && (
-            <span className="points-badge" title={`${ticket.story_points} story points`}>
-              {ticket.story_points}
+          {ticket.estimated_hours != null && (
+            <span className="points-badge" title={`${ticket.estimated_hours}h estimated`}>
+              {ticket.estimated_hours}h
             </span>
           )}
           <Avatar user={ticket.assignee} size={24} />

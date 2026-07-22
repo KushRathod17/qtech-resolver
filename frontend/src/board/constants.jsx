@@ -35,23 +35,22 @@ export const TYPE_LABELS = {
 };
 
 // The sub-classification that replaced Story/Epic — only meaningful when
-// ticket_type === "task".
+// ticket_type === "task". Free text on the backend (not a DB enum), so this
+// list can change with just a frontend deploy.
 export const TASK_CATEGORIES = [
+  "manual",
+  "task",
+  "issue",
+  "change_request",
   "new_development",
-  "enhancement",
-  "maintenance",
-  "documentation",
-  "investigation",
-  "configuration",
 ];
 
 export const TASK_CATEGORY_LABELS = {
+  manual: "Manual",
+  task: "Task",
+  issue: "Issue",
+  change_request: "Change Request",
   new_development: "New Development",
-  enhancement: "Enhancement",
-  maintenance: "Maintenance",
-  documentation: "Documentation",
-  investigation: "Investigation",
-  configuration: "Configuration",
 };
 
 // Fixed list, migrated 1:1 from the old configurable Components table — see

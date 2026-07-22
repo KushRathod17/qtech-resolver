@@ -215,14 +215,14 @@ def test_bulk_delete_is_privileged(client, dev, admin, make_ticket):
 def test_duplicate_copies_fields_but_not_history(client, admin, label, make_ticket):
     """A duplicate is a NEW report of the same problem, not a clone of how far
     the original got."""
-    t = make_ticket(title="AMEX bug", status="done", label_ids=[label["id"]], story_points=5)
+    t = make_ticket(title="AMEX bug", status="done", label_ids=[label["id"]], estimated_hours=5)
     r = client.post(f"/tickets/{t['id']}/duplicate", headers=auth(admin["token"]))
     assert r.status_code == 201
     copy = r.json()
 
     assert copy["title"] == "AMEX bug (copy)"
     assert copy["key"] != t["key"]
-    assert copy["story_points"] == 5
+    assert copy["estimated_hours"] == 5
     assert [l["name"] for l in copy["labels"]] == ["Payments"]
     assert copy["status"] == "todo"        # not "done"
     assert copy["resolved_at"] is None

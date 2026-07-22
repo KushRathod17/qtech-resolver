@@ -15,7 +15,6 @@ import {
   ticketsApi,
   labelsApi,
   usersApi,
-  sprintsApi,
   parentTagsApi,
   filtersApi,
   teamsApi,
@@ -27,6 +26,8 @@ import BoardToolbar from "../components/BoardToolbar";
 import BulkActionBar from "../components/BulkActionBar";
 import { TicketCardBody } from "../components/TicketCard";
 import TicketModal from "../components/TicketModal";
+
+const BOARD_POLL_MS = 20_000;
 
 const EMPTY_FILTERS = {
   search: "",
@@ -44,7 +45,6 @@ export default function Board() {
   const [tickets, setTickets] = useState([]);
   const [users, setUsers] = useState([]);
   const [labels, setLabels] = useState([]);
-  const [sprints, setSprints] = useState([]);
   const [parentTags, setParentTags] = useState([]);
   const [clients, setClients] = useState([]);
   const [teams, setTeams] = useState([]);
@@ -92,21 +92,43 @@ export default function Board() {
     loadTickets();
   }, [loadTickets]);
 
+  // Live-ish sync: no websockets in this stack, so a teammate's changes show
+  // up on the next poll rather than instantly. Skipped mid-drag so a
+  // background refresh can't yank a card out from under an in-progress drop —
+  // the open ticket panel isn't touched by this at all, it manages its own
+  // sync (see TicketModal).
+  const activeTicketRef = useRef(null);
+  useEffect(() => {
+    activeTicketRef.current = activeTicket;
+  }, [activeTicket]);
+
+  useEffect(() => {
+    const poll = () => {
+      if (!activeTicketRef.current) loadTickets();
+    };
+    const id = setInterval(poll, BOARD_POLL_MS);
+    // Catch up immediately when the tab regains focus, rather than waiting
+    // out the interval.
+    window.addEventListener("focus", poll);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", poll);
+    };
+  }, [loadTickets]);
+
   // Reference data only needs fetching once.
   useEffect(() => {
     Promise.all([
       usersApi.list(),
       labelsApi.list(),
-      sprintsApi.list(),
       parentTagsApi.list(),
       ticketsApi.clients(),
       filtersApi.list(),
       teamsApi.list(),
     ])
-      .then(([u, l, s, pt, cl, sf, tm]) => {
+      .then(([u, l, pt, cl, sf, tm]) => {
         setUsers(u);
         setLabels(l);
-        setSprints(s);
         setParentTags(pt);
         setClients(cl);
         setSavedFilters(sf);
@@ -411,7 +433,6 @@ export default function Board() {
           count={selectedIds.size}
           users={users}
           labels={labels}
-          sprints={sprints}
           busy={bulkBusy}
           onApply={handleBulkApply}
           onDelete={handleBulkDelete}
@@ -449,6 +470,13 @@ export default function Board() {
               prev.some((l) => l.id === label.id)
                 ? prev
                 : [...prev, label].sort((a, b) => a.name.localeCompare(b.name))
+            )
+          }
+          onParentTagCreated={(tag) =>
+            setParentTags((prev) =>
+              prev.some((t) => t.id === tag.id)
+                ? prev
+                : [...prev, tag].sort((a, b) => a.name.localeCompare(b.name))
             )
           }
         />

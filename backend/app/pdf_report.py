@@ -119,7 +119,7 @@ def build_report_pdf(
         str(len(done_tickets)),
     ]]
     story.append(table(
-        ["Total tickets", "Points done/total", "Ongoing", "Not touched", "Done"],
+        ["Total tickets", "Hours done/total", "Ongoing", "Not touched", "Done"],
         overview_rows,
     ))
     if by_status:
@@ -132,10 +132,10 @@ def build_report_pdf(
     if ongoing_tickets:
         rows = [[
             t.key, t.title, _status_label(t.status), _name(t.assignee),
-            t.product or "—", str(t.story_points) if t.story_points is not None else "—",
+            t.product or "—", str(t.estimated_hours) if t.estimated_hours is not None else "—",
         ] for t in ongoing_tickets]
         story.append(table(
-            ["Ticket", "Title", "Status", "Assignee", "Product", "Pts"],
+            ["Ticket", "Title", "Status", "Assignee", "Product", "Hrs"],
             rows, col_widths=[0.7 * inch, 2.3 * inch, 0.9 * inch, 1.3 * inch, 1.1 * inch, 0.4 * inch],
         ))
     else:
@@ -161,10 +161,10 @@ def build_report_pdf(
     if done_tickets:
         rows = [[
             t.key, t.title, _name(t.assignee), t.product or "—",
-            str(t.story_points) if t.story_points is not None else "—",
+            str(t.estimated_hours) if t.estimated_hours is not None else "—",
         ] for t in done_tickets]
         story.append(table(
-            ["Ticket", "Title", "Assignee", "Product", "Pts"],
+            ["Ticket", "Title", "Assignee", "Product", "Hrs"],
             rows, col_widths=[0.7 * inch, 2.7 * inch, 1.3 * inch, 1.3 * inch, 0.5 * inch],
         ))
     else:
@@ -178,7 +178,7 @@ def build_report_pdf(
             str(row["done_count"]), str(row["points_completed"]),
         ] for row in by_employee]
         story.append(table(
-            ["Employee", "Assigned", "In progress", "Done", "Points completed"],
+            ["Employee", "Assigned", "In progress", "Done", "Hours completed"],
             rows,
         ))
     else:
@@ -191,7 +191,7 @@ def build_report_pdf(
         rows = [[
             row["label"].name, str(row["total_count"]), str(row["done_count"]), str(row["points_total"]),
         ] for row in labelled]
-        story.append(table(["Label", "Total", "Done", "Points"], rows))
+        story.append(table(["Label", "Total", "Done", "Hours"], rows))
     else:
         story.append(Paragraph("No labelled tickets match these filters.", empty_style))
 

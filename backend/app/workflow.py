@@ -15,7 +15,7 @@ never offer an action the server would refuse — the two can't drift.
 from dataclasses import dataclass
 from typing import Optional
 
-from .models import HandoffAction, TeamKind, TicketStatus
+from .models import HandoffAction, TeamKind, TicketStatus, TicketType
 
 
 @dataclass(frozen=True)
@@ -34,24 +34,29 @@ class ActionSpec:
 # server tells them apart from the action of the handoff that gave them custody
 # (see available_actions) — no extra column needed.
 
-_TESTING_FIRST_PASS = [
-    ActionSpec(
-        HandoffAction.FORWARDED,
-        "Confirm bug → forward to Development",
-        TeamKind.DEVELOPMENT,
-        note_required=False,
-        resulting_status=TicketStatus.IN_PROGRESS,
-    ),
-    ActionSpec(
-        HandoffAction.RETURNED_NOT_REPRODUCIBLE,
-        "Not reproducible → return to Support",
-        None,
-        # A bug bounced back with no explanation is the single most infuriating
-        # thing in a support queue.
-        note_required=True,
-        resulting_status=TicketStatus.TODO,
-    ),
-]
+def _testing_first_pass(ticket) -> list[ActionSpec]:
+    """Wording only -- same two actions either way. A Task routed through
+    Testing isn't a "bug" that needs "confirming"; saying so on a plain Task
+    was just confusing. Bug tickets keep the sharper, bug-specific language."""
+    is_bug = ticket.ticket_type == TicketType.BUG
+    return [
+        ActionSpec(
+            HandoffAction.FORWARDED,
+            "Confirm bug → forward to Development" if is_bug else "Approve → forward to Development",
+            TeamKind.DEVELOPMENT,
+            note_required=False,
+            resulting_status=TicketStatus.IN_PROGRESS,
+        ),
+        ActionSpec(
+            HandoffAction.RETURNED_NOT_REPRODUCIBLE,
+            "Not reproducible → return to Support" if is_bug else "Can't proceed → return to Support",
+            None,
+            # A bug bounced back with no explanation is the single most infuriating
+            # thing in a support queue.
+            note_required=True,
+            resulting_status=TicketStatus.TODO,
+        ),
+    ]
 
 _TESTING_VERIFYING = [
     ActionSpec(
@@ -156,7 +161,7 @@ def available_actions(ticket, viewer) -> list[ActionSpec]:
         return _SUPPORT
 
     if kind == TeamKind.TESTING:
-        return _TESTING_VERIFYING if _is_verifying_a_fix(ticket) else _TESTING_FIRST_PASS
+        return _TESTING_VERIFYING if _is_verifying_a_fix(ticket) else _testing_first_pass(ticket)
 
     # A team of kind OTHER holds it: no workflow actions defined. Deliberately
     # empty rather than a crash — teams are extensible.

@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
-  sprintsApi,
   reportsApi,
   usersApi,
   labelsApi,
@@ -12,8 +11,6 @@ import {
 } from "../api/resources";
 import { downloadFile } from "../api/files";
 import { COLUMNS, PRODUCTS, Avatar } from "../board/constants";
-import BurndownChart from "../components/charts/BurndownChart";
-import VelocityChart from "../components/charts/VelocityChart";
 import { SERIES, INK, niceTicks, barPath } from "../components/charts/chartUtils";
 
 const EMPTY_FILTERS = {
@@ -184,7 +181,7 @@ function LabelBarChart({ rows }) {
             </text>
             <text x={cx} y={H - 34} textAnchor="middle" className="chart-tick">{r.label.name}</text>
             <text x={cx} y={H - 20} textAnchor="middle" className="chart-tick chart-tick-faint">
-              {r.points_total} pt{r.points_total === 1 ? "" : "s"}
+              {r.points_total}h
             </text>
           </g>
         );
@@ -221,13 +218,6 @@ export default function Reports() {
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
 
-  // Sprint burndown/velocity — unchanged, still its own section below.
-  const [sprints, setSprints] = useState([]);
-  const [selectedId, setSelectedId] = useState("");
-  const [burndown, setBurndown] = useState(null);
-  const [velocity, setVelocity] = useState(null);
-  const [sprintStats, setSprintStats] = useState(null);
-
   useEffect(() => {
     Promise.all([usersApi.list(), labelsApi.list(), teamsApi.list()])
       .then(([u, l, t]) => {
@@ -237,27 +227,6 @@ export default function Reports() {
       })
       .catch((err) => setError(errorMessage(err, "Couldn't load reference data.")));
   }, []);
-
-  useEffect(() => {
-    Promise.all([sprintsApi.list(), sprintsApi.velocity()])
-      .then(([list, vel]) => {
-        setSprints(list);
-        setVelocity(vel);
-        const active = list.find((s) => s.state === "active") || list[0];
-        setSelectedId(active?.id || "");
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (!selectedId) return;
-    Promise.all([sprintsApi.burndown(selectedId), sprintsApi.stats(selectedId)])
-      .then(([b, s]) => {
-        setBurndown(b);
-        setSprintStats(s);
-      })
-      .catch(() => {});
-  }, [selectedId]);
 
   const load = useCallback(async () => {
     try {
@@ -387,7 +356,7 @@ export default function Reports() {
             <div className="stat-row">
               <StatTile label="Total tickets" value={overview.total_tickets} />
               <StatTile
-                label="Points completed"
+                label="Hours completed"
                 value={`${overview.completed_points}/${overview.total_points}`}
                 hint={`${completionPct}% of matched work`}
               />
@@ -415,7 +384,7 @@ export default function Reports() {
                       <th scope="col">Status</th>
                       <th scope="col">Assignee</th>
                       <th scope="col">Product</th>
-                      <th scope="col">Points</th>
+                      <th scope="col">Hours</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -426,7 +395,7 @@ export default function Reports() {
                         <td><StatusPill status={t.status} /></td>
                         <td><AssigneeCell user={t.assignee} /></td>
                         <td>{t.product || <span className="empty-cell">—</span>}</td>
-                        <td>{t.story_points ?? <span className="empty-cell">—</span>}</td>
+                        <td>{t.estimated_hours ?? <span className="empty-cell">—</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -492,7 +461,7 @@ export default function Reports() {
                       <th scope="col" className="issues-grow-col">Title</th>
                       <th scope="col">Assignee</th>
                       <th scope="col">Product</th>
-                      <th scope="col">Points</th>
+                      <th scope="col">Hours</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -502,7 +471,7 @@ export default function Reports() {
                         <td className="issues-grow-col">{t.title}</td>
                         <td><AssigneeCell user={t.assignee} /></td>
                         <td>{t.product || <span className="empty-cell">—</span>}</td>
-                        <td>{t.story_points ?? <span className="empty-cell">—</span>}</td>
+                        <td>{t.estimated_hours ?? <span className="empty-cell">—</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -530,7 +499,7 @@ export default function Reports() {
                       <th scope="col">Assigned</th>
                       <th scope="col">In progress</th>
                       <th scope="col">Done</th>
-                      <th scope="col">Points completed</th>
+                      <th scope="col">Hours completed</th>
                       <th scope="col" className="issues-grow-col">Progress</th>
                     </tr>
                   </thead>
@@ -583,7 +552,7 @@ export default function Reports() {
                       <th scope="col">Label</th>
                       <th scope="col">Total</th>
                       <th scope="col">Done</th>
-                      <th scope="col">Points</th>
+                      <th scope="col">Hours</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -604,59 +573,6 @@ export default function Reports() {
               </div>
             )}
           </section>
-
-          {/* --- Sprint burndown/velocity --- */}
-          {sprints.length > 0 && (
-            <>
-              <div className="page-head">
-                <h3>Sprint</h3>
-                <select
-                  className="filter-select"
-                  value={selectedId}
-                  onChange={(e) => setSelectedId(e.target.value)}
-                  aria-label="Sprint"
-                >
-                  {sprints.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} {s.state === "active" ? "(active)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {sprintStats && (
-                <div className="stat-row">
-                  <StatTile
-                    label="Points completed"
-                    value={`${sprintStats.completed_points}/${sprintStats.total_points}`}
-                    hint={
-                      sprintStats.total_points > 0
-                        ? `${Math.round((sprintStats.completed_points / sprintStats.total_points) * 100)}% of the sprint`
-                        : undefined
-                    }
-                  />
-                  <StatTile label="Tickets done" value={`${sprintStats.completed_tickets}/${sprintStats.total_tickets}`} />
-                  <StatTile label="Average velocity" value={velocity?.average_velocity ?? 0} hint="points per completed sprint" />
-                </div>
-              )}
-
-              <section className="chart-card">
-                <div className="chart-card-head">
-                  <h3>Burndown — {burndown?.sprint.name}</h3>
-                  <p className="chart-sub">Points still open each day, against a straight line to zero.</p>
-                </div>
-                {burndown && <BurndownChart data={burndown} />}
-              </section>
-
-              <section className="chart-card">
-                <div className="chart-card-head">
-                  <h3>Velocity</h3>
-                  <p className="chart-sub">What each sprint took on, against what it actually finished.</p>
-                </div>
-                {velocity && <VelocityChart data={velocity} />}
-              </section>
-            </>
-          )}
         </>
       )}
     </div>
