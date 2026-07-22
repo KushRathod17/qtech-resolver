@@ -110,9 +110,9 @@ export default function TicketModal({
   const isNew = !ticket;
   const { user } = useAuth();
   const canDelete = user?.role === "admin" || user?.role === "manager";
-  // Same role the backend enforces on POST /parent-tags/ -- showing the
-  // control to someone who'd just get a 403 is worse than not showing it.
-  const canCreateParentTag = user?.role === "admin" || user?.role === "manager";
+  // Matches the backend: POST /parent-tags/ is open to any authenticated
+  // user now, same as labels -- only renaming/deleting a tag stays privileged.
+  const canCreateParentTag = true;
 
   const [form, setForm] = useState(isNew ? BLANK : ticketToForm(ticket));
   // The poll below runs on a timer set up once per ticket, so it can't just

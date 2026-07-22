@@ -144,8 +144,10 @@ export default function ParentTags() {
 
       {error && <div className="banner-error" role="alert">{error}</div>}
 
-      {canManage && (
-        <form className="sprint-form" onSubmit={handleCreate}>
+      {/* Creating is open to everyone, same as labels — renaming and deleting
+          below stay admin/manager-only since those affect every ticket
+          already carrying the tag. */}
+      <form className="sprint-form" onSubmit={handleCreate}>
           <div className="field">
             <label htmlFor="pt-name">New parent tag</label>
             <input
@@ -177,7 +179,6 @@ export default function ParentTags() {
             {creating ? "Creating…" : "Create tag"}
           </button>
         </form>
-      )}
 
       {tags.length === 0 ? (
         <p className="empty-state">

@@ -34,7 +34,11 @@ def list_parent_tag_stats(
 def create_parent_tag(
     payload: ParentTagCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.MANAGER)),
+    # Any user can create one — same reasoning as labels: someone grouping
+    # tickets under a new initiative while triaging shouldn't have to file a
+    # request for it. Renaming and deleting stay privileged, since those
+    # affect a tag every linked ticket already carries.
+    current_user: User = Depends(get_current_user),
 ):
     if crud.get_parent_tag_by_name(db, payload.name, current_user.organization_id):
         raise HTTPException(status_code=400, detail="A parent tag with that name already exists")
