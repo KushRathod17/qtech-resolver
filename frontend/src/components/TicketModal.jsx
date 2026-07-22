@@ -1094,7 +1094,7 @@ export default function TicketModal({
               {/* Only a top-level ticket owns sub-tasks; a sub-task can't nest
                   further. */}
               {!ticket.parent_id && (
-                <SubtaskList ticket={ticket} users={users} onChanged={loadThread} />
+                <SubtaskList ticket={ticket} onChanged={loadThread} />
               )}
 
               {handoffs.length > 0 && (

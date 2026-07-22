@@ -8,7 +8,7 @@ import { Avatar } from "../board/constants";
  * assignee, a status), but it's presented as a checkbox because that's the
  * weight of the thing — nobody wants a full form to record "write the tests".
  */
-export default function SubtaskList({ ticket, users, onChanged }) {
+export default function SubtaskList({ ticket, onChanged }) {
   const [subtasks, setSubtasks] = useState(ticket.subtasks || []);
   const [title, setTitle] = useState("");
   const [adding, setAdding] = useState(false);

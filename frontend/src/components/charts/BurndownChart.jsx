@@ -26,7 +26,10 @@ export default function BurndownChart({ data }) {
   const x = (i) => PAD.left + (i / (points.length - 1)) * plotW;
   const y = (v) => PAD.top + plotH - (v / top) * plotH;
 
-  const line = (pts, key) => pts.map((p, i) => `${x(points.indexOf(p))},${y(p[key])}`).join(" ");
+  // indexOf against the FULL points array, not the map index: `pts` is often a
+  // filtered subset (the actual line stops at today), and it still has to land
+  // on its original x position.
+  const line = (pts, key) => pts.map((p) => `${x(points.indexOf(p))},${y(p[key])}`).join(" ");
 
   // The actual line stops at today. Drawing it flat across future days would
   // read as a stalled sprint rather than one that simply hasn't happened yet.

@@ -9,8 +9,6 @@ import {
   TypeIcon,
   PriorityIcon,
   Avatar,
-  PRIORITY_LABELS,
-  TYPE_LABELS,
   PRODUCTS,
 } from "../board/constants";
 import SlaBadge from "../components/SlaBadge";
